@@ -5,6 +5,8 @@
 //   X402_KEY_REF     — op:// reference to the EVM private key (resolved lazily on first payment)
 //   X402_MAX_AMOUNT  — per-payment ceiling in decimal USDC (required to sign anything)
 
+mod payment;
+
 use clap::Parser;
 
 #[derive(Parser)]
