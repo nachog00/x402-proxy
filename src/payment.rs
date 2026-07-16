@@ -50,6 +50,81 @@ impl PaymentRequired {
     }
 }
 
+const USDC_DECIMALS: u32 = 6;
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("invalid X402_MAX_AMOUNT '{0}' — expected decimal USDC like '0.50' (max 6 decimals)")]
+    BadCeiling(String),
+    #[error("X402_MAX_AMOUNT is not set — refusing to sign any payment")]
+    CeilingUnset,
+    #[error("payment of {amount_usdc} USDC exceeds X402_MAX_AMOUNT ({ceiling_usdc} USDC)", amount_usdc = fmt_usdc(*amount), ceiling_usdc = fmt_usdc(*ceiling))]
+    OverCeiling { amount: u128, ceiling: u128 },
+    #[error("unparseable payment amount '{0}'")]
+    BadAmount(String),
+}
+
+/// Per-payment spending ceiling. `Unset` refuses to sign anything.
+#[derive(Debug, PartialEq, Eq)]
+pub enum AmountGuard {
+    Unset,
+    Max(u128),
+}
+
+impl AmountGuard {
+    /// Parse a decimal USDC string ("0.50") into an atomic-unit ceiling.
+    pub fn parse(s: &str) -> Result<Self, Error> {
+        let bad = || Error::BadCeiling(s.to_string());
+        let (whole, frac) = match s.split_once('.') {
+            Some((w, f)) => (w, f),
+            None => (s, ""),
+        };
+        if (whole.is_empty() && frac.is_empty())
+            || frac.len() > USDC_DECIMALS as usize
+            || (s.contains('.') && frac.is_empty())
+        {
+            return Err(bad());
+        }
+        let whole: u128 = if whole.is_empty() {
+            0
+        } else {
+            whole.parse().map_err(|_| bad())?
+        };
+        let frac_atomic: u128 = if frac.is_empty() {
+            0
+        } else {
+            let padded = format!("{frac:0<width$}", width = USDC_DECIMALS as usize);
+            padded.parse().map_err(|_| bad())?
+        };
+        Ok(Self::Max(whole * 10u128.pow(USDC_DECIMALS) + frac_atomic))
+    }
+
+    /// Check an atomic-unit amount string against the ceiling.
+    pub fn check(&self, atomic: &str) -> Result<(), Error> {
+        let amount: u128 = atomic
+            .parse()
+            .map_err(|_| Error::BadAmount(atomic.to_string()))?;
+        match self {
+            Self::Unset => Err(Error::CeilingUnset),
+            Self::Max(ceiling) if amount > *ceiling => Err(Error::OverCeiling {
+                amount,
+                ceiling: *ceiling,
+            }),
+            Self::Max(_) => Ok(()),
+        }
+    }
+}
+
+/// Format atomic USDC units as a decimal string (at least 2 decimals).
+pub fn fmt_usdc(atomic: u128) -> String {
+    let scale = 10u128.pow(USDC_DECIMALS);
+    let (whole, frac) = (atomic / scale, atomic % scale);
+    let frac = format!("{frac:06}");
+    let trimmed = frac.trim_end_matches('0');
+    let frac = if trimmed.len() <= 2 { &frac[..2] } else { trimmed };
+    format!("{whole}.{frac}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,5 +162,45 @@ mod tests {
         assert!(PaymentRequired::from_error_text(r#"{"error":"nope"}"#).is_none());
         assert!(PaymentRequired::from_error_text(r#"{"accepts":"not-an-array"}"#).is_none());
         assert!(PaymentRequired::from_error_text("").is_none());
+        assert!(PaymentRequired::from_error_text(r#"{"accepts":[]}"#).is_none());
+    }
+
+    #[test]
+    fn guard_parses_decimal_usdc() {
+        assert_eq!(AmountGuard::parse("0.50").unwrap(), AmountGuard::Max(500_000));
+        assert_eq!(AmountGuard::parse("1").unwrap(), AmountGuard::Max(1_000_000));
+        assert_eq!(AmountGuard::parse("2.000001").unwrap(), AmountGuard::Max(2_000_001));
+        assert_eq!(AmountGuard::parse(".5").unwrap(), AmountGuard::Max(500_000));
+    }
+
+    #[test]
+    fn guard_rejects_bad_ceilings() {
+        assert!(AmountGuard::parse("").is_err());
+        assert!(AmountGuard::parse("abc").is_err());
+        assert!(AmountGuard::parse("1.2345678").is_err()); // > 6 decimals
+        assert!(AmountGuard::parse("-1").is_err());
+        assert!(AmountGuard::parse("1.").is_err());
+    }
+
+    #[test]
+    fn guard_checks_atomic_amounts() {
+        let g = AmountGuard::Max(500_000); // 0.50 USDC
+        assert!(g.check("499999").is_ok());
+        assert!(g.check("500000").is_ok()); // at ceiling: allowed
+        assert!(matches!(g.check("500001"), Err(Error::OverCeiling { .. })));
+        assert!(g.check("not-a-number").is_err());
+    }
+
+    #[test]
+    fn guard_unset_refuses_everything() {
+        assert!(matches!(AmountGuard::Unset.check("1"), Err(Error::CeilingUnset)));
+    }
+
+    #[test]
+    fn formats_atomic_as_decimal_usdc() {
+        assert_eq!(fmt_usdc(500_000), "0.50");
+        assert_eq!(fmt_usdc(1_000_000), "1.00");
+        assert_eq!(fmt_usdc(2_000_001), "2.000001");
+        assert_eq!(fmt_usdc(0), "0.00");
     }
 }
