@@ -96,7 +96,11 @@ impl AmountGuard {
             let padded = format!("{frac:0<width$}", width = USDC_DECIMALS as usize);
             padded.parse().map_err(|_| bad())?
         };
-        Ok(Self::Max(whole * 10u128.pow(USDC_DECIMALS) + frac_atomic))
+        let atomic = whole
+            .checked_mul(10u128.pow(USDC_DECIMALS))
+            .and_then(|v| v.checked_add(frac_atomic))
+            .ok_or_else(bad)?;
+        Ok(Self::Max(atomic))
     }
 
     /// Check an atomic-unit amount string against the ceiling.
@@ -180,6 +184,10 @@ mod tests {
         assert!(AmountGuard::parse("1.2345678").is_err()); // > 6 decimals
         assert!(AmountGuard::parse("-1").is_err());
         assert!(AmountGuard::parse("1.").is_err());
+        // u128 overflow must fail closed, not wrap (multiplication overflow)
+        assert!(AmountGuard::parse("340282366920938463463374607431769").is_err());
+        // addition overflow at the exact multiplication threshold
+        assert!(AmountGuard::parse("340282366920938463463374607431768.999999").is_err());
     }
 
     #[test]
@@ -202,5 +210,11 @@ mod tests {
         assert_eq!(fmt_usdc(1_000_000), "1.00");
         assert_eq!(fmt_usdc(2_000_001), "2.000001");
         assert_eq!(fmt_usdc(0), "0.00");
+    }
+
+    #[test]
+    fn guard_check_survives_huge_wire_amounts() {
+        let g = AmountGuard::Max(500_000);
+        assert!(matches!(g.check(&"9".repeat(50)), Err(Error::BadAmount(_))));
     }
 }
