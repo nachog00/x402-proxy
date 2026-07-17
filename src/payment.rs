@@ -4,6 +4,8 @@
 //! add fields at any time, so no `deny_unknown_fields` here (unlike our own
 //! config structs).
 
+pub mod exact;
+
 use serde::Deserialize;
 
 /// Parsed x402 payment-required error body.
@@ -62,6 +64,8 @@ pub enum Error {
     OverCeiling { amount: u128, ceiling: u128 },
     #[error("unparseable payment amount '{0}'")]
     BadAmount(String),
+    #[error("signing failed: {0}")]
+    Signing(String),
 }
 
 /// Per-payment spending ceiling. `Unset` refuses to sign anything.
@@ -127,6 +131,13 @@ pub fn fmt_usdc(atomic: u128) -> String {
     let trimmed = frac.trim_end_matches('0');
     let frac = if trimmed.len() <= 2 { &frac[..2] } else { trimmed };
     format!("{whole}.{frac}")
+}
+
+/// Port: one way of satisfying an x402 payment demand.
+pub trait PaymentScheme: Send + Sync {
+    fn supports(&self, entry: &AcceptsEntry) -> bool;
+    /// Produce the `_meta["x402/payment"]` JSON value.
+    fn sign(&self, entry: &AcceptsEntry, x402_version: u32) -> Result<serde_json::Value, Error>;
 }
 
 #[cfg(test)]
