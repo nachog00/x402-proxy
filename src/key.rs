@@ -4,7 +4,7 @@
 //! written to disk, or placed in argv. The ref itself is also kept out of
 //! logs (op:// refs leak vault structure).
 
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -57,14 +57,15 @@ impl SecretResolver for OpCli {
             .arg(secret_ref)
             .output()
             .map_err(Error::Spawn)?;
+        // Wipe-on-drop from this point, on every path.
+        let stdout = Zeroizing::new(std::mem::take(&mut output.stdout));
         if !output.status.success() {
             return Err(Error::OpFailed {
                 status: output.status.to_string(),
                 stderr: redact(String::from_utf8_lossy(&output.stderr).trim(), secret_ref),
             });
         }
-        let mut secret = Zeroizing::new(String::from_utf8_lossy(&output.stdout).into_owned());
-        output.stdout.zeroize();
+        let mut secret = Zeroizing::new(String::from_utf8_lossy(&stdout).into_owned());
         let end = secret.trim_end().len();
         secret.truncate(end);
         if secret.is_empty() {
