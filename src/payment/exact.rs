@@ -2,7 +2,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use alloy_primitives::{hex, Address, B256, U256};
+use alloy_primitives::{address, hex, Address, B256, U256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{eip712_domain, sol};
@@ -14,6 +14,15 @@ const BASE_NETWORK: &str = "eip155:8453";
 const BASE_CHAIN_ID: u64 = 8453;
 const DEFAULT_TIMEOUT_SECS: u64 = 60;
 const VALID_AFTER_SLACK_SECS: u64 = 30;
+
+/// Canonical USDC on Base — the ONLY asset we sign for. The spending
+/// ceiling assumes this token's 6 decimals; signing for an upstream-chosen
+/// asset would let a malicious server bypass the ceiling's economics.
+const BASE_USDC: Address = address!("833589fCD6eDb6E08f4c7C32D4f71b54bdA02913");
+
+/// Upstream-supplied timeouts are clamped: a malicious server must not be
+/// able to mint authorizations valid for years (or overflow the math).
+const MAX_TIMEOUT_SECS: u64 = 300;
 
 sol! {
     struct TransferWithAuthorization {
@@ -50,10 +59,11 @@ impl ExactEip3009 {
         };
         let asset = parse_addr(&entry.asset)?;
         let to = parse_addr(&entry.pay_to)?;
-        let value: U256 = entry
+        let value: u128 = entry
             .amount
             .parse()
             .map_err(|_| Error::BadAmount(entry.amount.clone()))?;
+        let value = U256::from(value);
 
         let domain = eip712_domain! {
             name: entry.extra.name.clone().unwrap_or_else(|| "USD Coin".into()),
@@ -95,7 +105,9 @@ impl ExactEip3009 {
 
 impl PaymentScheme for ExactEip3009 {
     fn supports(&self, entry: &AcceptsEntry) -> bool {
-        entry.scheme == "exact" && entry.network == BASE_NETWORK
+        entry.scheme == "exact"
+            && entry.network == BASE_NETWORK
+            && entry.asset.parse::<Address>().is_ok_and(|a| a == BASE_USDC)
     }
 
     fn sign(&self, entry: &AcceptsEntry, x402_version: u32) -> Result<Value, Error> {
@@ -103,12 +115,14 @@ impl PaymentScheme for ExactEip3009 {
             .duration_since(UNIX_EPOCH)
             .expect("system clock before 1970")
             .as_secs();
-        let timeout = entry.max_timeout_seconds.unwrap_or(DEFAULT_TIMEOUT_SECS);
+        let timeout = entry.max_timeout_seconds.unwrap_or(DEFAULT_TIMEOUT_SECS).min(MAX_TIMEOUT_SECS);
+        let nonce = B256::try_random()
+            .map_err(|e| Error::Signing(format!("nonce generation failed: {e}")))?;
         self.sign_at(
             entry,
             x402_version,
-            B256::random(),
-            now - VALID_AFTER_SLACK_SECS,
+            nonce,
+            now.saturating_sub(VALID_AFTER_SLACK_SECS),
             now + timeout,
         )
     }
@@ -199,5 +213,31 @@ mod tests {
         let mut bad = apify_entry();
         bad.asset = "not-an-address".into();
         assert!(scheme.sign_at(&bad, 2, B256::ZERO, 0, 1).is_err());
+    }
+
+    #[test]
+    fn sign_clamps_absurd_timeouts() {
+        let scheme = ExactEip3009::new(test_signer());
+        let mut entry = apify_entry();
+        entry.max_timeout_seconds = Some(u64::MAX); // malicious upstream
+        let p = scheme.sign(&entry, 2).unwrap();
+        let valid_before: u64 = p["payload"]["authorization"]["validBefore"]
+            .as_str().unwrap().parse().unwrap();
+        let valid_after: u64 = p["payload"]["authorization"]["validAfter"]
+            .as_str().unwrap().parse().unwrap();
+        // window is at most slack + clamp, never years
+        assert!(valid_before - valid_after <= 30 + 300);
+    }
+
+    #[test]
+    fn supports_rejects_non_usdc_assets() {
+        let scheme = ExactEip3009::new(test_signer());
+        let mut evil = apify_entry();
+        evil.asset = "0x4aAbE17C239eF71c3A26bA7C2b3e0AeBbfC1DF26".into(); // not USDC
+        assert!(!scheme.supports(&evil));
+        // lowercase canonical USDC must still be accepted
+        let mut lower = apify_entry();
+        lower.asset = lower.asset.to_lowercase();
+        assert!(scheme.supports(&lower));
     }
 }
