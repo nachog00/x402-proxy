@@ -17,6 +17,8 @@ pub enum Error {
 }
 
 /// Port: resolve a secret reference to in-memory key material.
+///
+/// Blocking call — wrap in `spawn_blocking` from async contexts.
 pub trait SecretResolver: Send + Sync {
     fn resolve(&self, secret_ref: &str) -> Result<Zeroizing<String>, Error>;
 }
@@ -42,9 +44,15 @@ impl Default for OpCli {
     }
 }
 
+/// op echoes the full secret ref in its error output; scrub it so
+/// `OpFailed`'s Display never leaks vault structure.
+fn redact(stderr: &str, secret_ref: &str) -> String {
+    stderr.replace(secret_ref, "[redacted-ref]")
+}
+
 impl SecretResolver for OpCli {
     fn resolve(&self, secret_ref: &str) -> Result<Zeroizing<String>, Error> {
-        let output = std::process::Command::new(&self.program)
+        let mut output = std::process::Command::new(&self.program)
             .arg("read")
             .arg(secret_ref)
             .output()
@@ -52,18 +60,17 @@ impl SecretResolver for OpCli {
         if !output.status.success() {
             return Err(Error::OpFailed {
                 status: output.status.to_string(),
-                stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+                stderr: redact(String::from_utf8_lossy(&output.stderr).trim(), secret_ref),
             });
         }
-        let mut raw = Zeroizing::new(
-            String::from_utf8_lossy(&output.stdout).into_owned(),
-        );
-        let trimmed = Zeroizing::new(raw.trim().to_string());
-        raw.zeroize();
-        if trimmed.is_empty() {
+        let mut secret = Zeroizing::new(String::from_utf8_lossy(&output.stdout).into_owned());
+        output.stdout.zeroize();
+        let end = secret.trim_end().len();
+        secret.truncate(end);
+        if secret.is_empty() {
             return Err(Error::Empty);
         }
-        Ok(trimmed)
+        Ok(secret)
     }
 }
 
@@ -92,5 +99,22 @@ mod tests {
         let r = OpCli::with_program("echo");
         let key = r.resolve("0xabc").unwrap();
         assert_eq!(key.as_str(), "read 0xabc");
+    }
+
+    #[test]
+    fn op_cli_rejects_empty_output() {
+        // `true` exits 0 with no stdout: a "successful" blank read must fail.
+        let r = OpCli::with_program("true");
+        assert!(matches!(r.resolve("op://Vault/item/field").unwrap_err(), Error::Empty));
+    }
+
+    #[test]
+    fn redact_scrubs_ref_from_stderr() {
+        let out = redact(
+            "[ERROR] could not read secret 'op://Private/wallet/key': not found",
+            "op://Private/wallet/key",
+        );
+        assert!(!out.contains("op://Private/wallet/key"));
+        assert!(out.contains("[redacted-ref]"));
     }
 }
