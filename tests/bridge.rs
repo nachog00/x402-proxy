@@ -75,25 +75,29 @@ impl SecretResolver for FixedKey {
     }
 }
 
-async fn spawn_sandwich(
+/// General sandwich builder: any upstream handler, any resolver. Returns
+/// the client and the upstream keep-alive guard (dropping it cancels the
+/// upstream client and closes the transport, so tests must hold it for
+/// their whole body).
+async fn spawn_sandwich_full<H, R>(
+    upstream_handler: H,
+    resolver: R,
     guard: AmountGuard,
 ) -> (
     impl std::ops::Deref<Target = rmcp::service::Peer<rmcp::service::RoleClient>>,
-    Arc<Mutex<Vec<serde_json::Value>>>,
-    // Keep-alive for the proxy→mock upstream session: dropping this
-    // RunningService cancels the upstream client and closes the transport,
-    // so tests must hold it for their whole body.
     impl Send,
-) {
-    let seen = Arc::new(Mutex::new(Vec::new()));
-
+)
+where
+    H: ServerHandler + 'static,
+    R: SecretResolver + 'static,
+{
     // upstream server <-> proxy's client
     let (upstream_side, proxy_client_side) = tokio::io::duplex(1 << 16);
-    let mock = MockUpstream {
-        seen_payments: seen.clone(),
-    };
     tokio::spawn(async move {
-        let svc = mock.serve(tokio::io::split(upstream_side)).await.unwrap();
+        let svc = upstream_handler
+            .serve(tokio::io::split(upstream_side))
+            .await
+            .unwrap();
         svc.waiting().await.ok();
     });
     let upstream = ()
@@ -105,7 +109,7 @@ async fn spawn_sandwich(
     let proxy = X402Proxy::new(
         tools,
         upstream.peer().clone(),
-        Arc::new(FixedKey),
+        Arc::new(resolver),
         "op://unused/ref".into(),
         guard,
     );
@@ -120,6 +124,21 @@ async fn spawn_sandwich(
         svc.waiting().await.ok();
     });
     let client = ().serve(tokio::io::split(client_side)).await.unwrap();
+    (client, upstream)
+}
+
+async fn spawn_sandwich(
+    guard: AmountGuard,
+) -> (
+    impl std::ops::Deref<Target = rmcp::service::Peer<rmcp::service::RoleClient>>,
+    Arc<Mutex<Vec<serde_json::Value>>>,
+    impl Send,
+) {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mock = MockUpstream {
+        seen_payments: seen.clone(),
+    };
+    let (client, upstream) = spawn_sandwich_full(mock, FixedKey, guard).await;
     (client, seen, upstream)
 }
 
@@ -175,5 +194,92 @@ async fn refuses_when_ceiling_unset() {
         .await
         .unwrap();
     assert_eq!(result.is_error, Some(true));
+    assert!(seen.lock().unwrap().is_empty());
+}
+
+/// Upstream that always errors with a non-x402 message — used to verify the
+/// proxy passes ordinary tool errors through untouched, without attempting
+/// to parse or sign anything.
+#[derive(Clone)]
+struct BrokenUpstream;
+
+impl ServerHandler for BrokenUpstream {
+    fn get_info(&self) -> ServerInfo {
+        let mut info = ServerInfo::default();
+        info.capabilities = ServerCapabilities::builder().enable_tools().build();
+        info
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _ctx: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, McpError> {
+        let tool = Tool::new(
+            "paid-echo",
+            "echoes for money",
+            serde_json::json!({"type": "object"})
+                .as_object()
+                .cloned()
+                .unwrap(),
+        );
+        Ok(ListToolsResult {
+            tools: vec![tool],
+            ..Default::default()
+        })
+    }
+
+    async fn call_tool(
+        &self,
+        _request: CallToolRequestParams,
+        _ctx: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, McpError> {
+        Ok(CallToolResult::error(vec![ContentBlock::text(
+            "upstream exploded: disk full",
+        )]))
+    }
+}
+
+#[tokio::test]
+async fn non_payment_error_passes_through_untouched() {
+    let (client, _upstream) =
+        spawn_sandwich_full(BrokenUpstream, FixedKey, AmountGuard::Max(2_000_000)).await;
+    let result = client
+        .call_tool(CallToolRequestParams::new("paid-echo"))
+        .await
+        .unwrap();
+    assert_eq!(result.is_error, Some(true));
+    let text = result.content[0].as_text().unwrap().text.clone();
+    assert_eq!(text, "upstream exploded: disk full");
+}
+
+/// Resolver that always fails — simulates `op read` being unavailable (or
+/// returning nothing), without touching a real `op` binary.
+struct FailingKey;
+impl SecretResolver for FailingKey {
+    fn resolve(&self, _r: &str) -> Result<Zeroizing<String>, key::Error> {
+        Err(key::Error::Empty)
+    }
+}
+
+#[tokio::test]
+async fn key_resolution_failure_surfaces_as_tool_error() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mock = MockUpstream {
+        seen_payments: seen.clone(),
+    };
+    // Permissive ceiling: the guard check must pass so we actually reach
+    // key resolution rather than being rejected earlier.
+    let (client, _upstream) =
+        spawn_sandwich_full(mock, FailingKey, AmountGuard::Max(2_000_000)).await;
+    let result = client
+        .call_tool(CallToolRequestParams::new("paid-echo"))
+        .await
+        .unwrap();
+    assert_eq!(result.is_error, Some(true));
+    let text = result.content[0].as_text().unwrap().text.clone();
+    assert!(text.contains("could not obtain signing key"), "got: {text}");
+    // Upstream still demanded payment (its own error), but the proxy never
+    // got far enough to sign and retry.
     assert!(seen.lock().unwrap().is_empty());
 }
