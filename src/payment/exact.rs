@@ -103,11 +103,19 @@ impl ExactEip3009 {
     }
 }
 
+/// Signer-less support predicate: can the `exact` scheme satisfy this entry?
+/// Free function so the proxy can select a payable entry WITHOUT constructing
+/// a signer (the key stays untouched until we actually pay). `ExactEip3009`'s
+/// trait method delegates here so selection and signing can never diverge.
+pub fn supports(entry: &AcceptsEntry) -> bool {
+    entry.scheme == "exact"
+        && entry.network == BASE_NETWORK
+        && entry.asset.parse::<Address>().is_ok_and(|a| a == BASE_USDC)
+}
+
 impl PaymentScheme for ExactEip3009 {
     fn supports(&self, entry: &AcceptsEntry) -> bool {
-        entry.scheme == "exact"
-            && entry.network == BASE_NETWORK
-            && entry.asset.parse::<Address>().is_ok_and(|a| a == BASE_USDC)
+        supports(entry)
     }
 
     fn sign(&self, entry: &AcceptsEntry, x402_version: u32) -> Result<Value, Error> {
