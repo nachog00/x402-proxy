@@ -1,0 +1,21 @@
+name: Changeset required
+on:
+  pull_request:
+    branches: [dev]
+jobs:
+  changeset:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require a changeset
+        run: |
+          base='${{ github.event.pull_request.base.sha }}'
+          head='${{ github.event.pull_request.head.sha }}'
+          added=$(git diff --diff-filter=A --name-only "$base" "$head" -- .changeset/ | grep -E '\.md$' || true)
+          if [ -z "$added" ]; then
+            echo "::error::No changeset in this PR. Run 'knope document-change' and commit the file it adds under .changeset/ (use a patch-level entry for no-user-impact changes)."
+            exit 1
+          fi
+          echo "Found changeset(s):"; echo "$added"

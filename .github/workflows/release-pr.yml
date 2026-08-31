@@ -1,0 +1,31 @@
+name: Release PR
+on:
+  push:
+    branches: [dev]
+permissions:
+  contents: read
+  pull-requests: write
+concurrency: release-pr
+jobs:
+  open:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Open/update dev -> main release PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git fetch origin main --depth=1
+          if git diff --quiet origin/main..HEAD; then
+            echo "dev has no changes over main — nothing to open."; exit 0
+          fi
+          open=$(gh pr list --base main --head dev --state open --json number --jq 'length')
+          if [ "$open" = "0" ]; then
+            gh pr create --base main --head dev \
+              --title "Release: dev → main" \
+              --body $'Automated release PR — opened when `dev` diverges from `main`.\n\nMerging it consumes the changesets on `dev` and cuts a versioned release (see the preview comment for the exact version). **Merge with a merge commit** (not squash) so `dev` stays an ancestor of `main` and the post-release sync can fast-forward `dev`.'
+          else
+            echo "Release PR already open; it tracks new dev commits automatically."
+          fi

@@ -49,3 +49,10 @@ jobs:
         run: cargo publish -p x402-proxy
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: Sync dev to main
+        if: steps.m.outputs.mode == 'release'
+        run: |
+          # fast-forward dev to include the release/bump commit, so the branches
+          # don't drift (Cargo.toml version stays consistent for the next round)
+          git push origin HEAD:dev \
+            || echo "::warning::could not fast-forward dev; back-merge main into dev manually"
