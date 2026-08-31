@@ -27,7 +27,7 @@ jobs:
           fi
       - uses: dtolnay/rust-toolchain@stable
         if: steps.c.outputs.has == 'true'
-      - uses: knope-dev/action@v2
+      - uses: knope-dev/action@v2.1.2
         if: steps.c.outputs.has == 'true'
         with:
           version: 0.23.0
