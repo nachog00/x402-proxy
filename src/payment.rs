@@ -108,6 +108,11 @@ impl AtomicUsdc {
         Self(units)
     }
 
+    /// The raw atomic-unit count.
+    pub const fn as_atomic(self) -> u128 {
+        self.0
+    }
+
     /// Parse a wire amount: integer atomic units as a decimal string
     /// ("1000000" = 1.00 USDC).
     pub fn parse_wire(s: &str) -> Result<Self, Error> {

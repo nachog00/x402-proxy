@@ -1,14 +1,18 @@
-// x402-proxy — stdio MCP server that proxies an upstream HTTP MCP server
-// and auto-signs x402 payments (USDC on Base, exact scheme).
+// x402-proxy — stdio MCP server that proxies an upstream HTTP MCP server and
+// auto-signs x402 payments (USDC on Base; exact + upto schemes).
+//
+// Commands:
+//   serve --upstream <url>   proxy an upstream MCP server, signing payments
+//   approve-permit2          one-time on-chain USDC.approve(Permit2) for `upto`
 //
 // Env vars:
-//   X402_KEY_REF     — op:// reference to the EVM private key (resolved lazily on first payment)
-//   X402_MAX_AMOUNT  — per-payment ceiling in decimal USDC (unset = refuse to sign)
+//   X402_KEY_REF     — op:// reference to the EVM private key (both commands)
+//   X402_MAX_AMOUNT  — per-payment ceiling in decimal USDC (serve; unset = refuse)
 
 use std::sync::Arc;
 
 use anyhow::Context;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use rmcp::model::{ClientCapabilities, ClientInfo, Implementation};
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::ServiceExt;
@@ -19,17 +23,50 @@ use x402_proxy::proxy::X402Proxy;
 
 #[derive(Parser)]
 #[command(name = "x402-proxy", version, about)]
-struct Args {
-    /// Upstream MCP server URL (e.g. https://mcp.apify.com?payment=x402)
-    #[arg(long)]
-    upstream: String,
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Proxy an upstream MCP server over stdio, auto-signing x402 payments.
+    Serve {
+        /// Upstream MCP server URL (e.g. https://mcp.apify.com?payment=x402)
+        #[arg(long)]
+        upstream: String,
+    },
+    /// One-time: approve Uniswap Permit2 to spend your USDC on Base. Required
+    /// before the `upto` scheme can settle. Broadcasts one tx (costs a little
+    /// Base ETH for gas).
+    ApprovePermit2 {
+        /// Base RPC endpoint used to broadcast the approval.
+        #[arg(long, default_value = "https://mainnet.base.org")]
+        rpc_url: String,
+        /// Amount to approve: "max" (default) or decimal USDC like "5".
+        #[arg(long, default_value = "max")]
+        amount: String,
+        /// Skip the confirmation prompt.
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
-
+    let cli = Cli::parse();
     let key_ref = std::env::var("X402_KEY_REF").unwrap_or_default();
+    match cli.command {
+        Command::Serve { upstream } => serve(&upstream, key_ref).await,
+        Command::ApprovePermit2 {
+            rpc_url,
+            amount,
+            yes,
+        } => x402_proxy::approve::run(&rpc_url, &amount, yes, &key_ref).await,
+    }
+}
+
+async fn serve(upstream: &str, key_ref: String) -> anyhow::Result<()> {
     let guard = match std::env::var("X402_MAX_AMOUNT") {
         Ok(v) => AmountGuard::parse(&v).context("X402_MAX_AMOUNT")?,
         Err(_) => AmountGuard::Unset,
@@ -38,28 +75,27 @@ async fn main() -> anyhow::Result<()> {
         eprintln!("[x402-proxy] warning: X402_MAX_AMOUNT unset — all payments will be refused");
     }
 
-    let transport = StreamableHttpClientTransport::from_uri(args.upstream.clone());
+    let transport = StreamableHttpClientTransport::from_uri(upstream.to_string());
     let client_info = ClientInfo::new(
         ClientCapabilities::default(),
         Implementation::new("x402-proxy", env!("CARGO_PKG_VERSION")),
     );
-    let upstream = client_info
+    let upstream_svc = client_info
         .serve(transport)
         .await
-        .with_context(|| format!("connecting to upstream {}", args.upstream))?;
-    let tools = upstream
+        .with_context(|| format!("connecting to upstream {upstream}"))?;
+    let tools = upstream_svc
         .list_all_tools()
         .await
         .context("listing upstream tools")?;
     eprintln!(
-        "[x402-proxy] connected to {} — {} tools",
-        args.upstream,
+        "[x402-proxy] connected to {upstream} — {} tools",
         tools.len()
     );
 
     let proxy = X402Proxy::new(
         tools,
-        upstream.peer().clone(),
+        upstream_svc.peer().clone(),
         Arc::new(OpCli::new()),
         key_ref,
         guard,

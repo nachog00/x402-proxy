@@ -9,6 +9,11 @@ alloy-primitives = { version = "1.6", features = ["rand"] }
 alloy-signer = { version = "2.1", features = ["eip712"] }
 alloy-signer-local = { version = "2.1", features = ["eip712"] }
 alloy-sol-types = "1.6"
+# Provider stack — only used by the `approve-permit2` setup command, which
+# broadcasts one on-chain USDC.approve(Permit2) tx.
+alloy-provider = { version = "2.1", features = ["reqwest-rustls-tls"] }
+alloy-network = "2.1"
+alloy-contract = "2.1"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
