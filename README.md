@@ -1,5 +1,7 @@
 # x402-proxy
 
+[![CI](https://github.com/nachog00/x402-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/nachog00/x402-proxy/actions/workflows/ci.yml) [![crates.io](https://img.shields.io/crates/v/x402-proxy.svg)](https://crates.io/crates/x402-proxy)
+
 A single static Rust binary that lets an MCP client use **paid HTTP MCP servers**
 with no account — it transparently signs [x402](https://x402.org) USDC
 micropayments on Base per call.
