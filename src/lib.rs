@@ -3,6 +3,7 @@
 
 pub mod approve;
 pub mod key;
+pub mod net;
 pub mod payment;
 pub mod proxy;
 

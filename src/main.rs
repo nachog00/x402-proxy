@@ -17,7 +17,9 @@ use rmcp::model::{ClientCapabilities, ClientInfo, Implementation};
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::ServiceExt;
 
+use x402_proxy::approve::ApprovalAmount;
 use x402_proxy::key::OpCli;
+use x402_proxy::net::HttpUrl;
 use x402_proxy::payment::AmountGuard;
 use x402_proxy::proxy::X402Proxy;
 
@@ -32,9 +34,10 @@ struct Cli {
 enum Command {
     /// Proxy an upstream MCP server over stdio, auto-signing x402 payments.
     Serve {
-        /// Upstream MCP server URL (e.g. https://mcp.apify.com?payment=x402)
+        /// Upstream MCP server URL (e.g. https://mcp.apify.com?payment=x402).
+        /// Validated as an absolute http(s) URL at parse time.
         #[arg(long)]
-        upstream: String,
+        upstream: HttpUrl,
     },
     /// One-time: approve Uniswap Permit2 to spend your USDC on Base. Required
     /// before the `upto` scheme can settle. Broadcasts one tx (costs a little
@@ -42,10 +45,11 @@ enum Command {
     ApprovePermit2 {
         /// Base RPC endpoint used to broadcast the approval.
         #[arg(long, default_value = "https://mainnet.base.org")]
-        rpc_url: String,
+        rpc_url: HttpUrl,
         /// Amount to approve: "max" (default) or decimal USDC like "5".
+        /// Validated at parse time.
         #[arg(long, default_value = "max")]
-        amount: String,
+        amount: ApprovalAmount,
         /// Skip the confirmation prompt.
         #[arg(long)]
         yes: bool,
@@ -66,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
-async fn serve(upstream: &str, key_ref: String) -> anyhow::Result<()> {
+async fn serve(upstream: &HttpUrl, key_ref: String) -> anyhow::Result<()> {
     let guard = match std::env::var("X402_MAX_AMOUNT") {
         Ok(v) => AmountGuard::parse(&v).context("X402_MAX_AMOUNT")?,
         Err(_) => AmountGuard::Unset,
@@ -75,7 +79,7 @@ async fn serve(upstream: &str, key_ref: String) -> anyhow::Result<()> {
         eprintln!("[x402-proxy] warning: X402_MAX_AMOUNT unset — all payments will be refused");
     }
 
-    let transport = StreamableHttpClientTransport::from_uri(upstream.to_string());
+    let transport = StreamableHttpClientTransport::from_uri(upstream.as_str().to_string());
     let client_info = ClientInfo::new(
         ClientCapabilities::default(),
         Implementation::new("x402-proxy", env!("CARGO_PKG_VERSION")),

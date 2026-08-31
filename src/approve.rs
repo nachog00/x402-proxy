@@ -16,6 +16,7 @@ use alloy_sol_types::sol;
 use anyhow::{bail, Context, Result};
 
 use crate::key::{OpCli, SecretResolver};
+use crate::net::HttpUrl;
 use crate::payment::{AtomicUsdc, BASE_USDC};
 
 /// Canonical Uniswap Permit2 — the spender we approve.
@@ -29,11 +30,49 @@ sol! {
     }
 }
 
-pub async fn run(rpc_url: &str, amount: &str, yes: bool, key_ref: &str) -> Result<()> {
+/// The `--amount` flag, parsed at the CLI boundary (parse-don't-validate):
+/// either the unlimited `max` approval or an exact USDC ceiling.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ApprovalAmount {
+    Max,
+    Exact(AtomicUsdc),
+}
+
+impl ApprovalAmount {
+    fn to_u256(&self) -> U256 {
+        match self {
+            Self::Max => U256::MAX,
+            Self::Exact(a) => U256::from(a.as_atomic()),
+        }
+    }
+}
+
+impl std::str::FromStr for ApprovalAmount {
+    type Err = crate::payment::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.eq_ignore_ascii_case("max") {
+            Ok(Self::Max)
+        } else {
+            Ok(Self::Exact(AtomicUsdc::parse_decimal(s)?))
+        }
+    }
+}
+
+impl std::fmt::Display for ApprovalAmount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Max => write!(f, "max (unlimited)"),
+            Self::Exact(a) => write!(f, "{a} USDC"),
+        }
+    }
+}
+
+pub async fn run(rpc_url: &HttpUrl, amount: &ApprovalAmount, yes: bool, key_ref: &str) -> Result<()> {
     if key_ref.is_empty() {
         bail!("X402_KEY_REF is not set — needed to resolve the signing key");
     }
-    let requested = parse_amount(amount)?;
+    let requested = amount.to_u256();
 
     // Resolve the key via op (blocking), same path as payments. Never logged.
     let key_ref_owned = key_ref.to_string();
@@ -47,13 +86,10 @@ pub async fn run(rpc_url: &str, amount: &str, yes: bool, key_ref: &str) -> Resul
         .map_err(|_| anyhow::anyhow!("resolved key is not a valid EVM private key"))?;
     let owner = signer.address();
 
+    // rpc_url is already a validated http(s) URL (parsed at the CLI boundary).
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(signer))
-        .connect_http(
-            rpc_url
-                .parse()
-                .with_context(|| format!("invalid --rpc-url '{rpc_url}'"))?,
-        );
+        .connect_http(rpc_url.as_url().clone());
     let usdc = IERC20::new(BASE_USDC, &provider);
 
     // Idempotent: skip if already approved for at least the requested amount.
@@ -70,11 +106,7 @@ pub async fn run(rpc_url: &str, amount: &str, yes: bool, key_ref: &str) -> Resul
     }
 
     println!("Approve Uniswap Permit2 ({PERMIT2}) to spend USDC from {owner} on Base.");
-    if amount.eq_ignore_ascii_case("max") {
-        println!("Amount: max (unlimited)");
-    } else {
-        println!("Amount: {amount} USDC");
-    }
+    println!("Amount: {amount}");
     println!("This sends one transaction and costs a little Base ETH for gas.");
     if !yes {
         print!("Proceed? [y/N] ");
@@ -107,35 +139,30 @@ pub async fn run(rpc_url: &str, amount: &str, yes: bool, key_ref: &str) -> Resul
     Ok(())
 }
 
-/// Parse the `--amount` flag: "max" or decimal USDC (e.g. "5" or "0.50").
-fn parse_amount(amount: &str) -> Result<U256> {
-    if amount.eq_ignore_ascii_case("max") {
-        return Ok(U256::MAX);
-    }
-    let atomic = AtomicUsdc::parse_decimal(amount)
-        .map_err(|e| anyhow::anyhow!("invalid --amount '{amount}': {e}"))?;
-    Ok(U256::from(atomic.as_atomic()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn parse_amount_max_case_insensitive() {
-        assert_eq!(parse_amount("max").unwrap(), U256::MAX);
-        assert_eq!(parse_amount("MAX").unwrap(), U256::MAX);
+    fn parse(s: &str) -> Result<U256, crate::payment::Error> {
+        s.parse::<ApprovalAmount>().map(|a| a.to_u256())
     }
 
     #[test]
-    fn parse_amount_decimal_usdc() {
-        assert_eq!(parse_amount("0.50").unwrap(), U256::from(500_000));
-        assert_eq!(parse_amount("5").unwrap(), U256::from(5_000_000));
+    fn parses_max_case_insensitive() {
+        assert_eq!("max".parse::<ApprovalAmount>().unwrap(), ApprovalAmount::Max);
+        assert_eq!("MAX".parse::<ApprovalAmount>().unwrap(), ApprovalAmount::Max);
+        assert_eq!(parse("max").unwrap(), U256::MAX);
     }
 
     #[test]
-    fn parse_amount_rejects_garbage() {
-        assert!(parse_amount("abc").is_err());
-        assert!(parse_amount("1.2345678").is_err()); // > 6 decimals
+    fn parses_decimal_usdc() {
+        assert_eq!(parse("0.50").unwrap(), U256::from(500_000));
+        assert_eq!(parse("5").unwrap(), U256::from(5_000_000));
+    }
+
+    #[test]
+    fn rejects_garbage() {
+        assert!("abc".parse::<ApprovalAmount>().is_err());
+        assert!("1.2345678".parse::<ApprovalAmount>().is_err()); // > 6 decimals
     }
 }
