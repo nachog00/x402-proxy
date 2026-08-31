@@ -1,15 +1,51 @@
 name: Release
-# Publishes to crates.io when a GitHub Release is published (knope creates the
-# release via its `release` workflow). Requires a CARGO_REGISTRY_TOKEN secret.
+# Ongoing: on merge to main, if there are pending changesets, knope derives the
+# next version (bump + changelog + tag + GitHub release) and we publish to
+# crates.io. No changesets => no-op.
+# Bootstrap/recovery: workflow_dispatch publishes the current version as-is.
 on:
-  release:
-    types: [published]
+  push:
+    branches: [main]
+  workflow_dispatch:
+concurrency: release
+permissions:
+  contents: write
 jobs:
-  crates-io:
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Decide mode
+        id: m
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "mode=publish-current" >> "$GITHUB_OUTPUT"
+          elif find .changeset -name '*.md' -type f 2>/dev/null | grep -q .; then
+            echo "mode=release" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=none" >> "$GITHUB_OUTPUT"
+            echo "No changesets — nothing to release."
+          fi
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo publish -p x402-proxy
+        if: steps.m.outputs.mode != 'none'
+      - uses: Swatinem/rust-cache@v2
+        if: steps.m.outputs.mode != 'none'
+      - uses: knope-dev/action@v2
+        if: steps.m.outputs.mode == 'release'
+        with:
+          version: 0.23.0
+      - name: Cut release (knope — bump, changelog, tag, GitHub release)
+        if: steps.m.outputs.mode == 'release'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          knope release --verbose
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish to crates.io
+        if: steps.m.outputs.mode != 'none'
+        run: cargo publish -p x402-proxy
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
