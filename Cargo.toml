@@ -3,6 +3,11 @@ name = "x402-proxy"
 version = "0.1.0"
 edition = "2024"
 description = "stdio MCP proxy that auto-signs x402 payments for an upstream HTTP MCP server"
+license = "MIT"
+repository = "https://github.com/nachog00/x402-proxy"
+readme = "README.md"
+keywords = ["x402", "mcp", "payments", "ethereum", "usdc"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 alloy-primitives = { version = "1.6", features = ["rand"] }
