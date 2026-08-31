@@ -66,3 +66,31 @@ podman run --rm -v ./vectors:/app:Z -w /app docker.io/library/node:24-slim \
 
 Extracted from the [`mcps`](../mcps) monorepo, which references this as a PATH
 binary via its catalog `[server.proxy]` table. Design specs are in `docs/`.
+
+## Roadmap
+
+Tracked follow-ups (carried over from the `mcps` monorepo at extraction):
+
+- **`x402-rs` signer adoption (deferred).** `x402-rs` ships a client-side EVM
+  Permit2 `upto` signer too (`V2Eip155UptoClient`); its proxy/spender address is
+  byte-identical to ours, independently confirming our `SPENDER_PROXY` constant.
+  Keeping our viem-validated `exact`+`upto` signers for now; revisit calling their
+  free fns (`sign_erc3009_authorization`, `sign_permit2_upto_authorization`,
+  `x402-chain-eip155` feature `client`) behind our `PaymentScheme` trait only if
+  maintenance becomes a burden. Friction: their output is a base64 V2 envelope
+  we'd reshape into our leaner `_meta` JSON, and their signers have no unit tests.
+- **Upstream contribution.** Donate our viem cross-validation vectors / signing
+  unit tests to `x402-rs` — their EVM signers have zero unit tests and no
+  reference vectors; exactly our strength.
+- **Richer `_meta` envelope.** Evaluate the fuller `{accepted, resource, …}`
+  payload from the x402 MCP spec for conformance, and Permit2 EIP-2612
+  gas-sponsoring (skip the permit when allowance/nonce already suffice).
+- **JSON-RPC error interception.** Today we intercept payment-required only when it
+  arrives as an `is_error` tool result; also handle it arriving as a JSON-RPC error.
+- **More networks/schemes.** Non-Base EVM networks and additional schemes are
+  `PaymentScheme`/network extension points.
+- **Deployment.** A nix flake and/or a prebuilt static-musl binary (a container is
+  awkward given the `op` key-access requirement).
+- **End-to-end.** Observe a *successful* actor producing a small positive metered
+  `upto` settlement against real Apify (their actor infra was flaky during
+  testing; a failed actor correctly settled $0).
