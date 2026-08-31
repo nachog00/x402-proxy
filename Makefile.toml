@@ -1,0 +1,40 @@
+# cargo-make tasks — run with `makers <task>` (or `cargo make <task>`).
+[config]
+skip_core_tasks = true          # only the tasks defined here
+default_to_workspace = false    # our args already pass --workspace
+
+[tasks.fmt]
+description = "Format all code"
+command = "cargo"
+args = ["fmt", "--all"]
+
+[tasks.fmt-check]
+description = "Check formatting"
+command = "cargo"
+args = ["fmt", "--all", "--check"]
+
+[tasks.clippy]
+description = "Lint (deny warnings)"
+command = "cargo"
+args = ["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]
+
+[tasks.test]
+description = "Run all tests"
+command = "cargo"
+args = ["test", "--workspace"]
+
+[tasks.coverage]
+description = "Line coverage (tarpaulin, llvm engine) — prints a report and writes HTML to target/coverage"
+install_crate = { crate_name = "cargo-tarpaulin", binary = "cargo-tarpaulin", test_arg = "--version" }
+command = "cargo"
+args = ["tarpaulin", "--workspace", "--engine", "llvm", "--out", "Stdout", "--out", "Html", "--output-dir", "target/coverage"]
+
+[tasks.coverage-ci]
+description = "Coverage for CI: lcov output + fail under 70%"
+install_crate = { crate_name = "cargo-tarpaulin", binary = "cargo-tarpaulin", test_arg = "--version" }
+command = "cargo"
+args = ["tarpaulin", "--workspace", "--engine", "llvm", "--out", "Lcov", "--output-dir", "target/coverage", "--fail-under", "70"]
+
+[tasks.ci]
+description = "Everything CI checks: fmt, clippy, tests"
+dependencies = ["fmt-check", "clippy", "test"]
