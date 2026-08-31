@@ -33,8 +33,14 @@ args = ["tarpaulin", "--workspace", "--engine", "llvm", "--out", "Stdout", "--ou
 description = "Coverage for CI: lcov output + fail under 70%"
 install_crate = { crate_name = "cargo-tarpaulin", binary = "cargo-tarpaulin", test_arg = "--version" }
 command = "cargo"
-args = ["tarpaulin", "--workspace", "--engine", "llvm", "--out", "Lcov", "--output-dir", "target/coverage", "--fail-under", "70"]
+args = ["tarpaulin", "--workspace", "--engine", "llvm", "--out", "Lcov", "--out", "Stdout", "--output-dir", "target/coverage", "--fail-under", "70"]
 
 [tasks.ci]
 description = "Everything CI checks: fmt, clippy, tests"
 dependencies = ["fmt-check", "clippy", "test"]
+
+[tasks.changeset]
+description = "Record a changeset for the next release (interactive)"
+install_crate = { crate_name = "knope", binary = "knope", test_arg = "--version" }
+command = "knope"
+args = ["document-change"]

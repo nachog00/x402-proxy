@@ -1,6 +1,7 @@
 # x402-proxy
 
 [![CI](https://github.com/nachog00/x402-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/nachog00/x402-proxy/actions/workflows/ci.yml) [![crates.io](https://img.shields.io/crates/v/x402-proxy.svg)](https://crates.io/crates/x402-proxy)
+[![codecov](https://codecov.io/gh/nachog00/x402-proxy/graph/badge.svg)](https://codecov.io/gh/nachog00/x402-proxy)
 
 Use **paid MCP servers without an account.** `x402-proxy` is a small stdio MCP
 server you place in front of a paid HTTP MCP server; when a tool call requires
