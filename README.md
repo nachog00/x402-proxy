@@ -25,7 +25,7 @@ Selection prefers `upto`; the spend ceiling applies to its max.
 ## Install
 
 ```sh
-cargo install --path .
+cargo install --path crates/x402-proxy
 ```
 
 ## Usage
