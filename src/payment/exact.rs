@@ -8,7 +8,7 @@ use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{eip712_domain, sol};
 use serde_json::{json, Value};
 
-use crate::payment::{AcceptsEntry, Error, PaymentScheme};
+use crate::payment::{AcceptsEntry, Error, PaymentScheme, X402Version};
 
 const BASE_NETWORK: &str = "eip155:8453";
 const BASE_CHAIN_ID: u64 = 8453;
@@ -49,7 +49,7 @@ impl ExactEip3009 {
     fn sign_at(
         &self,
         entry: &AcceptsEntry,
-        x402_version: u32,
+        x402_version: X402Version,
         nonce: B256,
         valid_after: u64,
         valid_before: u64,
@@ -118,7 +118,7 @@ impl PaymentScheme for ExactEip3009 {
         supports(entry)
     }
 
-    fn sign(&self, entry: &AcceptsEntry, x402_version: u32) -> Result<Value, Error> {
+    fn sign(&self, entry: &AcceptsEntry, x402_version: X402Version) -> Result<Value, Error> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system clock before 1970")

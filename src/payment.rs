@@ -8,15 +8,20 @@ pub mod exact;
 
 use serde::Deserialize;
 
+/// The x402 protocol version negotiated with the upstream. A bare integer on
+/// the wire today; kept as a named alias so there is a single place to grow it
+/// into a richer owned type if we ever need to reason about versions.
+pub type X402Version = u32;
+
 /// Parsed x402 payment-required error body.
 #[derive(Debug, Deserialize)]
 pub struct PaymentRequired {
     #[serde(rename = "x402Version", default = "default_version")]
-    pub x402_version: u32,
+    pub x402_version: X402Version,
     pub accepts: Vec<AcceptsEntry>,
 }
 
-fn default_version() -> u32 {
+fn default_version() -> X402Version {
     2
 }
 
@@ -137,7 +142,8 @@ pub fn fmt_usdc(atomic: u128) -> String {
 pub trait PaymentScheme: Send + Sync {
     fn supports(&self, entry: &AcceptsEntry) -> bool;
     /// Produce the `_meta["x402/payment"]` JSON value.
-    fn sign(&self, entry: &AcceptsEntry, x402_version: u32) -> Result<serde_json::Value, Error>;
+    fn sign(&self, entry: &AcceptsEntry, x402_version: X402Version)
+        -> Result<serde_json::Value, Error>;
 }
 
 #[cfg(test)]
