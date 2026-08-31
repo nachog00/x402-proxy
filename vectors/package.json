@@ -1,0 +1,10 @@
+{
+  "name": "x402-test-vector",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "comment": "Container-run only (podman + node:24-slim, ignore-scripts). Sole purpose: gen-test-vector.mjs regenerates the viem signature vector that cross-validates the Rust signer. Not run on the host.",
+  "dependencies": {
+    "viem": "^2.48.11"
+  }
+}

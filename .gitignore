@@ -1,0 +1,7 @@
+/target
+Cargo.lock.orig
+vectors/node_modules/
+vectors/package-lock.json
+secrets.toml
+*.stderr
+*.stdout

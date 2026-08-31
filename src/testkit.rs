@@ -1,6 +1,6 @@
 //! Shared test fixtures — defined once so a hand-copied literal can't drift
 //! between a signer, its assertions, and the cross-validation vector
-//! generators in `proxies/x402/gen-*-vector.mjs`.
+//! generators in `vectors/gen-*-vector.mjs`.
 //!
 //! `#[doc(hidden)]` and consts-only: nothing meaningful ships in the real
 //! binary, but both unit tests and the integration tests in `tests/` can share
@@ -21,7 +21,7 @@ pub const FACILITATOR: &str = "0x14fDa13953Fc30428938E6BF950d036e77214e52";
 pub const AMOUNT_1_USDC: &str = "1000000";
 
 // Fixed timestamps for the cross-validation vectors. These MUST match the
-// values baked into proxies/x402/gen-test-vector.mjs (exact) and
+// values baked into vectors/gen-test-vector.mjs (exact) and
 // gen-upto-vector.mjs (upto) — the Rust signer is asserted equal to those.
 /// `validAfter` for both schemes' vectors.
 pub const VALID_AFTER: u64 = 1_700_000_000;
