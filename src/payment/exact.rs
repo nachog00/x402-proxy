@@ -2,27 +2,19 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use alloy_primitives::{address, hex, Address, B256, U256};
+use alloy_primitives::{hex, Address, B256, U256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{eip712_domain, sol};
 use serde_json::{json, Value};
 
-use crate::payment::{AcceptsEntry, Error, PaymentScheme, X402Version};
+use crate::payment::{
+    AcceptsEntry, Error, PaymentScheme, X402Version, BASE_CHAIN_ID, BASE_NETWORK, BASE_USDC,
+    MAX_TIMEOUT_SECS, VALID_AFTER_SLACK_SECS,
+};
 
-const BASE_NETWORK: &str = "eip155:8453";
-const BASE_CHAIN_ID: u64 = 8453;
+/// `exact` uses a 60s default when the server omits `maxTimeoutSeconds`.
 const DEFAULT_TIMEOUT_SECS: u64 = 60;
-const VALID_AFTER_SLACK_SECS: u64 = 30;
-
-/// Canonical USDC on Base — the ONLY asset we sign for. The spending
-/// ceiling assumes this token's 6 decimals; signing for an upstream-chosen
-/// asset would let a malicious server bypass the ceiling's economics.
-const BASE_USDC: Address = address!("833589fCD6eDb6E08f4c7C32D4f71b54bdA02913");
-
-/// Upstream-supplied timeouts are clamped: a malicious server must not be
-/// able to mint authorizations valid for years (or overflow the math).
-const MAX_TIMEOUT_SECS: u64 = 300;
 
 sol! {
     struct TransferWithAuthorization {

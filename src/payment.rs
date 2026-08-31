@@ -5,8 +5,22 @@
 //! config structs).
 
 pub mod exact;
+pub mod upto;
 
+use alloy_primitives::{address, Address};
 use serde::Deserialize;
+
+/// Base network + canonical USDC — the only (network, asset) any scheme signs
+/// for, shared by `exact` and `upto`. Signing an upstream-chosen asset or
+/// network would let a malicious server bypass the ceiling's economics.
+pub(crate) const BASE_NETWORK: &str = "eip155:8453";
+pub(crate) const BASE_CHAIN_ID: u64 = 8453;
+pub(crate) const BASE_USDC: Address = address!("833589fCD6eDb6E08f4c7C32D4f71b54bdA02913");
+/// Upstream-supplied timeouts are clamped so a malicious server can't mint
+/// authorizations valid for years (or overflow the validity math).
+pub(crate) const MAX_TIMEOUT_SECS: u64 = 300;
+/// Backdate `validAfter` slightly to tolerate clock skew with the facilitator.
+pub(crate) const VALID_AFTER_SLACK_SECS: u64 = 30;
 
 /// The x402 protocol version negotiated with the upstream. A bare integer on
 /// the wire today; kept as a named alias so there is a single place to grow it
