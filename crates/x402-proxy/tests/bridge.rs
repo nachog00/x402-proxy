@@ -110,10 +110,10 @@ where
             .unwrap();
         svc.waiting().await.ok();
     });
-    let upstream = ()
-        .serve(tokio::io::split(proxy_client_side))
-        .await
-        .expect("connect to mock upstream");
+    let upstream =
+        ().serve(tokio::io::split(proxy_client_side))
+            .await
+            .expect("connect to mock upstream");
     let tools = upstream.list_all_tools().await.unwrap();
 
     let proxy = X402Proxy::new(
@@ -155,7 +155,8 @@ async fn spawn_sandwich(
 
 #[tokio::test]
 async fn lists_upstream_tools() {
-    let (client, _seen, _upstream) = spawn_sandwich(AmountGuard::Max(AtomicUsdc::from_atomic(2_000_000))).await;
+    let (client, _seen, _upstream) =
+        spawn_sandwich(AmountGuard::Max(AtomicUsdc::from_atomic(2_000_000))).await;
     let tools = client.list_all_tools().await.unwrap();
     assert_eq!(tools.len(), 1);
     assert_eq!(tools[0].name, "paid-echo");
@@ -163,7 +164,8 @@ async fn lists_upstream_tools() {
 
 #[tokio::test]
 async fn signs_and_retries_on_payment_required() {
-    let (client, seen, _upstream) = spawn_sandwich(AmountGuard::Max(AtomicUsdc::from_atomic(2_000_000))).await;
+    let (client, seen, _upstream) =
+        spawn_sandwich(AmountGuard::Max(AtomicUsdc::from_atomic(2_000_000))).await;
     let result = client
         .call_tool(CallToolRequestParams::new("paid-echo"))
         .await
@@ -215,7 +217,8 @@ async fn prefers_upto_when_both_schemes_offered() {
 #[tokio::test]
 async fn refuses_over_ceiling_without_signing() {
     // ceiling 0.50 USDC < demanded 1.00 USDC
-    let (client, seen, _upstream) = spawn_sandwich(AmountGuard::Max(AtomicUsdc::from_atomic(500_000))).await;
+    let (client, seen, _upstream) =
+        spawn_sandwich(AmountGuard::Max(AtomicUsdc::from_atomic(500_000))).await;
     let result = client
         .call_tool(CallToolRequestParams::new("paid-echo"))
         .await
@@ -223,7 +226,10 @@ async fn refuses_over_ceiling_without_signing() {
     assert_eq!(result.is_error, Some(true));
     let text = result.content[0].as_text().unwrap().text.clone();
     assert!(text.contains("X402_MAX_AMOUNT"), "got: {text}");
-    assert!(seen.lock().unwrap().is_empty(), "must not sign over ceiling");
+    assert!(
+        seen.lock().unwrap().is_empty(),
+        "must not sign over ceiling"
+    );
 }
 
 #[tokio::test]
@@ -282,8 +288,12 @@ impl ServerHandler for BrokenUpstream {
 
 #[tokio::test]
 async fn non_payment_error_passes_through_untouched() {
-    let (client, _upstream) =
-        spawn_sandwich_full(BrokenUpstream, FixedKey, AmountGuard::Max(AtomicUsdc::from_atomic(2_000_000))).await;
+    let (client, _upstream) = spawn_sandwich_full(
+        BrokenUpstream,
+        FixedKey,
+        AmountGuard::Max(AtomicUsdc::from_atomic(2_000_000)),
+    )
+    .await;
     let result = client
         .call_tool(CallToolRequestParams::new("paid-echo"))
         .await
@@ -311,8 +321,12 @@ async fn key_resolution_failure_surfaces_as_tool_error() {
     };
     // Permissive ceiling: the guard check must pass so we actually reach
     // key resolution rather than being rejected earlier.
-    let (client, _upstream) =
-        spawn_sandwich_full(mock, FailingKey, AmountGuard::Max(AtomicUsdc::from_atomic(2_000_000))).await;
+    let (client, _upstream) = spawn_sandwich_full(
+        mock,
+        FailingKey,
+        AmountGuard::Max(AtomicUsdc::from_atomic(2_000_000)),
+    )
+    .await;
     let result = client
         .call_tool(CallToolRequestParams::new("paid-echo"))
         .await

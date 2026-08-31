@@ -12,15 +12,15 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use alloy_primitives::{address, hex, Address, B256, U256};
+use alloy_primitives::{Address, B256, U256, address, hex};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{eip712_domain, sol};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::payment::{
-    AcceptsEntry, Error, PaymentScheme, X402Version, BASE_CHAIN_ID, BASE_NETWORK, BASE_USDC,
-    MAX_TIMEOUT_SECS, VALID_AFTER_SLACK_SECS,
+    AcceptsEntry, BASE_CHAIN_ID, BASE_NETWORK, BASE_USDC, Error, MAX_TIMEOUT_SECS, PaymentScheme,
+    VALID_AFTER_SLACK_SECS, X402Version,
 };
 
 /// Canonical Uniswap Permit2 (same address on every chain). This is the
@@ -244,7 +244,10 @@ mod tests {
         assert_eq!(addr(&auth["spender"]), SPENDER_PROXY);
         assert_eq!(auth["deadline"], DEADLINE.to_string());
         assert_eq!(addr(&auth["witness"]["to"]), expect_addr(PAY_TO));
-        assert_eq!(addr(&auth["witness"]["facilitator"]), expect_addr(FACILITATOR));
+        assert_eq!(
+            addr(&auth["witness"]["facilitator"]),
+            expect_addr(FACILITATOR)
+        );
         assert_eq!(auth["witness"]["validAfter"], VALID_AFTER.to_string());
         assert_eq!(
             auth["nonce"],
@@ -286,8 +289,6 @@ mod tests {
         let scheme = UptoPermit2::new(test_signer());
         let mut bad = apify_upto_entry();
         bad.pay_to = "not-an-address".into();
-        assert!(scheme
-            .sign_at(&bad, 2, B256::ZERO, 1, 0)
-            .is_err());
+        assert!(scheme.sign_at(&bad, 2, B256::ZERO, 1, 0).is_err());
     }
 }

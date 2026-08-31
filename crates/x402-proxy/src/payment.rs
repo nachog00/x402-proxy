@@ -7,7 +7,7 @@
 pub mod exact;
 pub mod upto;
 
-use alloy_primitives::{address, Address};
+use alloy_primitives::{Address, address};
 use serde::Deserialize;
 
 /// Base network + canonical USDC — the only (network, asset) any scheme signs
@@ -86,7 +86,10 @@ pub enum Error {
     #[error("X402_MAX_AMOUNT is not set — refusing to sign any payment")]
     CeilingUnset,
     #[error("payment of {amount} USDC exceeds X402_MAX_AMOUNT ({ceiling} USDC)")]
-    OverCeiling { amount: AtomicUsdc, ceiling: AtomicUsdc },
+    OverCeiling {
+        amount: AtomicUsdc,
+        ceiling: AtomicUsdc,
+    },
     #[error("unparseable payment amount '{0}'")]
     BadAmount(String),
     #[error("signing failed: {0}")]
@@ -160,7 +163,11 @@ impl std::fmt::Display for AtomicUsdc {
         let (whole, frac) = (self.0 / scale, self.0 % scale);
         let frac = format!("{frac:06}");
         let trimmed = frac.trim_end_matches('0');
-        let frac = if trimmed.len() <= 2 { &frac[..2] } else { trimmed };
+        let frac = if trimmed.len() <= 2 {
+            &frac[..2]
+        } else {
+            trimmed
+        };
         write!(f, "{whole}.{frac}")
     }
 }
@@ -197,8 +204,11 @@ impl AmountGuard {
 pub trait PaymentScheme: Send + Sync {
     fn supports(&self, entry: &AcceptsEntry) -> bool;
     /// Produce the `_meta["x402/payment"]` JSON value.
-    fn sign(&self, entry: &AcceptsEntry, x402_version: X402Version)
-        -> Result<serde_json::Value, Error>;
+    fn sign(
+        &self,
+        entry: &AcceptsEntry,
+        x402_version: X402Version,
+    ) -> Result<serde_json::Value, Error>;
 }
 
 #[cfg(test)]
@@ -285,7 +295,10 @@ mod tests {
         let a = |s: &str| AtomicUsdc::parse_wire(s).unwrap();
         assert!(g.check(a("499999")).is_ok());
         assert!(g.check(a("500000")).is_ok()); // at ceiling: allowed
-        assert!(matches!(g.check(a("500001")), Err(Error::OverCeiling { .. })));
+        assert!(matches!(
+            g.check(a("500001")),
+            Err(Error::OverCeiling { .. })
+        ));
     }
 
     #[test]

@@ -2,15 +2,15 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use alloy_primitives::{hex, Address, B256, U256};
+use alloy_primitives::{Address, B256, U256, hex};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{eip712_domain, sol};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::payment::{
-    AcceptsEntry, Error, PaymentScheme, X402Version, BASE_CHAIN_ID, BASE_NETWORK, BASE_USDC,
-    MAX_TIMEOUT_SECS, VALID_AFTER_SLACK_SECS,
+    AcceptsEntry, BASE_CHAIN_ID, BASE_NETWORK, BASE_USDC, Error, MAX_TIMEOUT_SECS, PaymentScheme,
+    VALID_AFTER_SLACK_SECS, X402Version,
 };
 
 /// `exact` uses a 60s default when the server omits `maxTimeoutSeconds`.
@@ -47,7 +47,8 @@ impl ExactEip3009 {
         valid_before: u64,
     ) -> Result<Value, Error> {
         let parse_addr = |s: &str| -> Result<Address, Error> {
-            s.parse().map_err(|_| Error::Signing(format!("invalid address '{s}'")))
+            s.parse()
+                .map_err(|_| Error::Signing(format!("invalid address '{s}'")))
         };
         let asset = parse_addr(&entry.asset)?;
         let to = parse_addr(&entry.pay_to)?;
@@ -115,7 +116,10 @@ impl PaymentScheme for ExactEip3009 {
             .duration_since(UNIX_EPOCH)
             .expect("system clock before 1970")
             .as_secs();
-        let timeout = entry.max_timeout_seconds.unwrap_or(DEFAULT_TIMEOUT_SECS).min(MAX_TIMEOUT_SECS);
+        let timeout = entry
+            .max_timeout_seconds
+            .unwrap_or(DEFAULT_TIMEOUT_SECS)
+            .min(MAX_TIMEOUT_SECS);
         let nonce = B256::try_random()
             .map_err(|e| Error::Signing(format!("nonce generation failed: {e}")))?;
         self.sign_at(
@@ -221,9 +225,15 @@ mod tests {
         entry.max_timeout_seconds = Some(u64::MAX); // malicious upstream
         let p = scheme.sign(&entry, 2).unwrap();
         let valid_before: u64 = p["payload"]["authorization"]["validBefore"]
-            .as_str().unwrap().parse().unwrap();
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
         let valid_after: u64 = p["payload"]["authorization"]["validAfter"]
-            .as_str().unwrap().parse().unwrap();
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
         // window is at most slack + clamp, never years
         assert!(valid_before - valid_after <= 30 + 300);
     }

@@ -9,11 +9,11 @@
 use std::io::Write;
 
 use alloy_network::EthereumWallet;
-use alloy_primitives::{address, Address, U256};
+use alloy_primitives::{Address, U256, address};
 use alloy_provider::ProviderBuilder;
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::sol;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
 use crate::key::{OpCli, SecretResolver};
 use crate::net::HttpUrl;
@@ -68,7 +68,12 @@ impl std::fmt::Display for ApprovalAmount {
     }
 }
 
-pub async fn run(rpc_url: &HttpUrl, amount: &ApprovalAmount, yes: bool, key_ref: &str) -> Result<()> {
+pub async fn run(
+    rpc_url: &HttpUrl,
+    amount: &ApprovalAmount,
+    yes: bool,
+    key_ref: &str,
+) -> Result<()> {
     if key_ref.is_empty() {
         bail!("X402_KEY_REF is not set — needed to resolve the signing key");
     }
@@ -99,9 +104,7 @@ pub async fn run(rpc_url: &HttpUrl, amount: &ApprovalAmount, yes: bool, key_ref:
         .await
         .context("reading current Permit2 allowance")?;
     if current >= requested {
-        println!(
-            "Permit2 is already approved for {owner} (allowance ≥ requested). Nothing to do."
-        );
+        println!("Permit2 is already approved for {owner} (allowance ≥ requested). Nothing to do.");
         return Ok(());
     }
 
@@ -149,8 +152,14 @@ mod tests {
 
     #[test]
     fn parses_max_case_insensitive() {
-        assert_eq!("max".parse::<ApprovalAmount>().unwrap(), ApprovalAmount::Max);
-        assert_eq!("MAX".parse::<ApprovalAmount>().unwrap(), ApprovalAmount::Max);
+        assert_eq!(
+            "max".parse::<ApprovalAmount>().unwrap(),
+            ApprovalAmount::Max
+        );
+        assert_eq!(
+            "MAX".parse::<ApprovalAmount>().unwrap(),
+            ApprovalAmount::Max
+        );
         assert_eq!(parse("max").unwrap(), U256::MAX);
     }
 

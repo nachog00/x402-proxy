@@ -34,7 +34,9 @@ impl OpCli {
     }
 
     fn with_program(program: &str) -> Self {
-        Self { program: program.to_string() }
+        Self {
+            program: program.to_string(),
+        }
     }
 }
 
@@ -106,7 +108,10 @@ mod tests {
     fn op_cli_rejects_empty_output() {
         // `true` exits 0 with no stdout: a "successful" blank read must fail.
         let r = OpCli::with_program("true");
-        assert!(matches!(r.resolve("op://Vault/item/field").unwrap_err(), Error::Empty));
+        assert!(matches!(
+            r.resolve("op://Vault/item/field").unwrap_err(),
+            Error::Empty
+        ));
     }
 
     #[test]

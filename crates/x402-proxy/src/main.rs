@@ -13,9 +13,9 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
+use rmcp::ServiceExt;
 use rmcp::model::{ClientCapabilities, ClientInfo, Implementation};
 use rmcp::transport::StreamableHttpClientTransport;
-use rmcp::ServiceExt;
 
 use x402_proxy::approve::ApprovalAmount;
 use x402_proxy::key::OpCli;

@@ -60,7 +60,11 @@ mod tests {
 
     #[test]
     fn accepts_http_and_https() {
-        assert!("https://mcp.apify.com?payment=x402".parse::<HttpUrl>().is_ok());
+        assert!(
+            "https://mcp.apify.com?payment=x402"
+                .parse::<HttpUrl>()
+                .is_ok()
+        );
         assert!("http://localhost:8080/mcp".parse::<HttpUrl>().is_ok());
     }
 
