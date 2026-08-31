@@ -13,10 +13,15 @@ use x402_proxy::proxy::X402Proxy;
 
 const PAYMENT_JSON: &str = r#"{"x402Version":2,"accepts":[{"scheme":"exact","network":"eip155:8453","asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","amount":"1000000","payTo":"0x4aAbE17C239eF71c3A26bA7C2b3e0AeBbfC1DF26","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]}"#;
 
-/// Mock upstream: one tool, demands payment until `_meta["x402/payment"]` arrives.
+/// Both schemes, as Apify offers them — `upto` first, then `exact`.
+const BOTH_SCHEMES_JSON: &str = r#"{"x402Version":2,"accepts":[{"scheme":"upto","network":"eip155:8453","asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","amount":"1000000","payTo":"0x4aAbE17C239eF71c3A26bA7C2b3e0AeBbfC1DF26","maxTimeoutSeconds":18000,"extra":{"name":"USD Coin","version":"2","facilitatorAddress":"0x14fDa13953Fc30428938E6BF950d036e77214e52"}},{"scheme":"exact","network":"eip155:8453","asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","amount":"1000000","payTo":"0x4aAbE17C239eF71c3A26bA7C2b3e0AeBbfC1DF26","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]}"#;
+
+/// Mock upstream: one tool, demands payment (with `payment_json`) until
+/// `_meta["x402/payment"]` arrives.
 #[derive(Clone)]
 struct MockUpstream {
     seen_payments: Arc<Mutex<Vec<serde_json::Value>>>,
+    payment_json: &'static str,
 }
 
 impl ServerHandler for MockUpstream {
@@ -62,7 +67,7 @@ impl ServerHandler for MockUpstream {
             // two separate content blocks — mirror that so the proxy's
             // per-block parsing is exercised (joining them would break it).
             None => Ok(CallToolResult::error(vec![
-                ContentBlock::text(PAYMENT_JSON),
+                ContentBlock::text(self.payment_json),
                 ContentBlock::text("Payment required to run this Actor or access this resource."),
             ])),
         }
@@ -141,6 +146,7 @@ async fn spawn_sandwich(
     let seen = Arc::new(Mutex::new(Vec::new()));
     let mock = MockUpstream {
         seen_payments: seen.clone(),
+        payment_json: PAYMENT_JSON,
     };
     let (client, upstream) = spawn_sandwich_full(mock, FixedKey, guard).await;
     (client, seen, upstream)
@@ -171,6 +177,38 @@ async fn signs_and_retries_on_payment_required() {
     assert_eq!(
         p["payload"]["authorization"]["from"],
         "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf"
+    );
+    let sig = p["payload"]["signature"].as_str().unwrap();
+    assert!(sig.starts_with("0x") && sig.len() == 132);
+}
+
+#[tokio::test]
+async fn prefers_upto_when_both_schemes_offered() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mock = MockUpstream {
+        seen_payments: seen.clone(),
+        payment_json: BOTH_SCHEMES_JSON,
+    };
+    let (client, _upstream) = spawn_sandwich_full(
+        mock,
+        FixedKey,
+        AmountGuard::Max(AtomicUsdc::from_atomic(2_000_000)),
+    )
+    .await;
+
+    let result = client
+        .call_tool(CallToolRequestParams::new("paid-echo"))
+        .await
+        .unwrap();
+    assert_ne!(result.is_error, Some(true));
+
+    let payments = seen.lock().unwrap();
+    assert_eq!(payments.len(), 1);
+    let p = &payments[0];
+    assert_eq!(p["scheme"], "upto", "must prefer upto over exact");
+    assert!(
+        p["payload"]["permit2Authorization"].is_object(),
+        "upto payload carries permit2Authorization"
     );
     let sig = p["payload"]["signature"].as_str().unwrap();
     assert!(sig.starts_with("0x") && sig.len() == 132);
@@ -271,6 +309,7 @@ async fn key_resolution_failure_surfaces_as_tool_error() {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let mock = MockUpstream {
         seen_payments: seen.clone(),
+        payment_json: PAYMENT_JSON,
     };
     // Permissive ceiling: the guard check must pass so we actually reach
     // key resolution rather than being rejected earlier.

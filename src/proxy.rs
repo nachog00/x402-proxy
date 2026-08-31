@@ -11,7 +11,24 @@ use tokio::sync::OnceCell;
 
 use crate::key::SecretResolver;
 use crate::payment::exact::{self, ExactEip3009};
+use crate::payment::upto::{self, UptoPermit2};
 use crate::payment::{AmountGuard, PaymentRequired, PaymentScheme};
+
+/// Which scheme the proxy selected for a payment-required entry.
+#[derive(Clone, Copy)]
+enum SchemeKind {
+    Upto,
+    Exact,
+}
+
+impl SchemeKind {
+    fn label(self) -> &'static str {
+        match self {
+            SchemeKind::Upto => "upto",
+            SchemeKind::Exact => "exact",
+        }
+    }
+}
 
 pub struct X402Proxy {
     tools: Vec<Tool>,
@@ -19,7 +36,8 @@ pub struct X402Proxy {
     resolver: Arc<dyn SecretResolver>,
     key_ref: String,
     guard: AmountGuard,
-    scheme: OnceCell<ExactEip3009>,
+    /// Lazily-resolved signer, shared by whichever scheme a payment selects.
+    signer: OnceCell<PrivateKeySigner>,
 }
 
 impl X402Proxy {
@@ -36,13 +54,14 @@ impl X402Proxy {
             resolver,
             key_ref,
             guard,
-            scheme: OnceCell::new(),
+            signer: OnceCell::new(),
         }
     }
 
-    /// Lazy signer: first payment triggers `op read`; cached for process life.
-    async fn scheme(&self) -> Result<&ExactEip3009, String> {
-        self.scheme
+    /// Lazy signer: the first payment triggers `op read`; cached for process
+    /// life. Both schemes build on this one signer.
+    async fn signer(&self) -> Result<&PrivateKeySigner, String> {
+        self.signer
             .get_or_try_init(|| async {
                 let resolver = self.resolver.clone();
                 let key_ref = self.key_ref.clone();
@@ -55,7 +74,7 @@ impl X402Proxy {
                     .parse()
                     .map_err(|_| "resolved key is not a valid EVM private key".to_string())?;
                 eprintln!("[x402-proxy] signer ready: {}", signer.address());
-                Ok(ExactEip3009::new(signer))
+                Ok(signer)
             })
             .await
     }
@@ -81,17 +100,19 @@ impl X402Proxy {
             .find_map(|t| PaymentRequired::from_error_text(&t.text))?;
 
         // Static support check first — no key prompt for schemes we can't do.
-        // Uses exact::supports (a free function) so selection and signing can
-        // never diverge — the same predicate backs ExactEip3009::supports.
-        let entry = match pr.accepts.iter().find(|e| exact::supports(e)) {
-            Some(e) => e,
-            None => {
-                eprintln!(
-                    "[x402-proxy] payment required for '{}' but no supported scheme — passing error through",
-                    request.name
-                );
-                return None;
-            }
+        // Prefer `upto` (the facilitator settles the ACTUAL usage) over `exact`
+        // (pay the flat max). The free `supports` fns back the trait impls, so
+        // selection and signing can never diverge.
+        let (entry, scheme_kind) = if let Some(e) = pr.accepts.iter().find(|e| upto::supports(e)) {
+            (e, SchemeKind::Upto)
+        } else if let Some(e) = pr.accepts.iter().find(|e| exact::supports(e)) {
+            (e, SchemeKind::Exact)
+        } else {
+            eprintln!(
+                "[x402-proxy] payment required for '{}' but no supported scheme — passing error through",
+                request.name
+            );
+            return None;
         };
 
         // Parse the wire amount once (parse-don't-validate); the guard and the
@@ -111,17 +132,23 @@ impl X402Proxy {
         }
 
         eprintln!(
-            "[x402-proxy] paying {amount} USDC to {} for '{}'",
-            entry.pay_to, request.name
+            "[x402-proxy] paying up to {amount} USDC via {} to {} for '{}'",
+            scheme_kind.label(),
+            entry.pay_to,
+            request.name
         );
 
-        let scheme = match self.scheme().await {
-            Ok(s) => s,
+        let signer = match self.signer().await {
+            Ok(s) => s.clone(),
             Err(e) => {
                 return Some(CallToolResult::error(vec![ContentBlock::text(format!(
                     "x402-proxy could not obtain signing key: {e}"
                 ))]));
             }
+        };
+        let scheme: Box<dyn PaymentScheme> = match scheme_kind {
+            SchemeKind::Upto => Box::new(UptoPermit2::new(signer)),
+            SchemeKind::Exact => Box::new(ExactEip3009::new(signer)),
         };
         let payment = match scheme.sign(entry, pr.x402_version) {
             Ok(p) => p,
