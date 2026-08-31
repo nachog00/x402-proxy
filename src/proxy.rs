@@ -70,13 +70,15 @@ impl X402Proxy {
         if result.is_error != Some(true) {
             return None;
         }
-        let text: String = result
+        // Upstream may return several content blocks — a JSON payment body
+        // alongside a human-readable hint (Apify sends exactly this). Parse each
+        // block on its own and take the first that is a valid payment-required
+        // body; joining the blocks would corrupt the JSON and it would be missed.
+        let pr = result
             .content
             .iter()
-            .filter_map(|c| c.as_text().map(|t| t.text.as_str()))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let pr = PaymentRequired::from_error_text(&text)?;
+            .filter_map(|c| c.as_text())
+            .find_map(|t| PaymentRequired::from_error_text(&t.text))?;
 
         // Static support check first — no key prompt for schemes we can't do.
         // Uses exact::supports (a free function) so selection and signing can

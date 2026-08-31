@@ -58,9 +58,13 @@ impl ServerHandler for MockUpstream {
                 self.seen_payments.lock().unwrap().push(p);
                 Ok(CallToolResult::success(vec![ContentBlock::text("paid ok")]))
             }
-            None => Ok(CallToolResult::error(vec![ContentBlock::text(
-                PAYMENT_JSON,
-            )])),
+            // Real Apify returns the JSON body AND a human-readable hint as
+            // two separate content blocks — mirror that so the proxy's
+            // per-block parsing is exercised (joining them would break it).
+            None => Ok(CallToolResult::error(vec![
+                ContentBlock::text(PAYMENT_JSON),
+                ContentBlock::text("Payment required to run this Actor or access this resource."),
+            ])),
         }
     }
 }
