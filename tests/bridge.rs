@@ -8,7 +8,7 @@ use rmcp::{ErrorData as McpError, ServerHandler, ServiceExt};
 use zeroize::Zeroizing;
 
 use x402_proxy::key::{self, SecretResolver};
-use x402_proxy::payment::AmountGuard;
+use x402_proxy::payment::{AmountGuard, AtomicUsdc};
 use x402_proxy::proxy::X402Proxy;
 
 const PAYMENT_JSON: &str = r#"{"x402Version":2,"accepts":[{"scheme":"exact","network":"eip155:8453","asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","amount":"1000000","payTo":"0x4aAbE17C239eF71c3A26bA7C2b3e0AeBbfC1DF26","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]}"#;
@@ -148,7 +148,7 @@ async fn spawn_sandwich(
 
 #[tokio::test]
 async fn lists_upstream_tools() {
-    let (client, _seen, _upstream) = spawn_sandwich(AmountGuard::Max(2_000_000)).await;
+    let (client, _seen, _upstream) = spawn_sandwich(AmountGuard::Max(AtomicUsdc::from_atomic(2_000_000))).await;
     let tools = client.list_all_tools().await.unwrap();
     assert_eq!(tools.len(), 1);
     assert_eq!(tools[0].name, "paid-echo");
@@ -156,7 +156,7 @@ async fn lists_upstream_tools() {
 
 #[tokio::test]
 async fn signs_and_retries_on_payment_required() {
-    let (client, seen, _upstream) = spawn_sandwich(AmountGuard::Max(2_000_000)).await;
+    let (client, seen, _upstream) = spawn_sandwich(AmountGuard::Max(AtomicUsdc::from_atomic(2_000_000))).await;
     let result = client
         .call_tool(CallToolRequestParams::new("paid-echo"))
         .await
@@ -179,7 +179,7 @@ async fn signs_and_retries_on_payment_required() {
 #[tokio::test]
 async fn refuses_over_ceiling_without_signing() {
     // ceiling 0.50 USDC < demanded 1.00 USDC
-    let (client, seen, _upstream) = spawn_sandwich(AmountGuard::Max(500_000)).await;
+    let (client, seen, _upstream) = spawn_sandwich(AmountGuard::Max(AtomicUsdc::from_atomic(500_000))).await;
     let result = client
         .call_tool(CallToolRequestParams::new("paid-echo"))
         .await
@@ -247,7 +247,7 @@ impl ServerHandler for BrokenUpstream {
 #[tokio::test]
 async fn non_payment_error_passes_through_untouched() {
     let (client, _upstream) =
-        spawn_sandwich_full(BrokenUpstream, FixedKey, AmountGuard::Max(2_000_000)).await;
+        spawn_sandwich_full(BrokenUpstream, FixedKey, AmountGuard::Max(AtomicUsdc::from_atomic(2_000_000))).await;
     let result = client
         .call_tool(CallToolRequestParams::new("paid-echo"))
         .await
@@ -275,7 +275,7 @@ async fn key_resolution_failure_surfaces_as_tool_error() {
     // Permissive ceiling: the guard check must pass so we actually reach
     // key resolution rather than being rejected earlier.
     let (client, _upstream) =
-        spawn_sandwich_full(mock, FailingKey, AmountGuard::Max(2_000_000)).await;
+        spawn_sandwich_full(mock, FailingKey, AmountGuard::Max(AtomicUsdc::from_atomic(2_000_000))).await;
     let result = client
         .call_tool(CallToolRequestParams::new("paid-echo"))
         .await

@@ -65,24 +65,39 @@ pub enum Error {
     BadCeiling(String),
     #[error("X402_MAX_AMOUNT is not set — refusing to sign any payment")]
     CeilingUnset,
-    #[error("payment of {amount_usdc} USDC exceeds X402_MAX_AMOUNT ({ceiling_usdc} USDC)", amount_usdc = fmt_usdc(*amount), ceiling_usdc = fmt_usdc(*ceiling))]
-    OverCeiling { amount: u128, ceiling: u128 },
+    #[error("payment of {amount} USDC exceeds X402_MAX_AMOUNT ({ceiling} USDC)")]
+    OverCeiling { amount: AtomicUsdc, ceiling: AtomicUsdc },
     #[error("unparseable payment amount '{0}'")]
     BadAmount(String),
     #[error("signing failed: {0}")]
     Signing(String),
 }
 
-/// Per-payment spending ceiling. `Unset` refuses to sign anything.
-#[derive(Debug, PartialEq, Eq)]
-pub enum AmountGuard {
-    Unset,
-    Max(u128),
-}
+/// A quantity of USDC in atomic units (6-decimal fixed point).
+///
+/// A newtype rather than a bare `u128` because it owns an invariant — the value
+/// is a count of 1e-6 USDC — and a canonical decimal rendering. Parse raw input
+/// into it once at the boundary (parse-don't-validate); nothing downstream ever
+/// handles a bare amount string again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct AtomicUsdc(u128);
 
-impl AmountGuard {
-    /// Parse a decimal USDC string ("0.50") into an atomic-unit ceiling.
-    pub fn parse(s: &str) -> Result<Self, Error> {
+impl AtomicUsdc {
+    /// Wrap a raw atomic-unit count — every `u128` is a valid count.
+    pub const fn from_atomic(units: u128) -> Self {
+        Self(units)
+    }
+
+    /// Parse a wire amount: integer atomic units as a decimal string
+    /// ("1000000" = 1.00 USDC).
+    pub fn parse_wire(s: &str) -> Result<Self, Error> {
+        s.parse()
+            .map(Self)
+            .map_err(|_| Error::BadAmount(s.to_string()))
+    }
+
+    /// Parse a human ceiling: decimal USDC ("0.50"), at most 6 decimals.
+    pub fn parse_decimal(s: &str) -> Result<Self, Error> {
         let bad = || Error::BadCeiling(s.to_string());
         let (whole, frac) = match s.split_once('.') {
             Some((w, f)) => (w, f),
@@ -109,14 +124,39 @@ impl AmountGuard {
             .checked_mul(10u128.pow(USDC_DECIMALS))
             .and_then(|v| v.checked_add(frac_atomic))
             .ok_or_else(bad)?;
-        Ok(Self::Max(atomic))
+        Ok(Self(atomic))
+    }
+}
+
+impl std::fmt::Display for AtomicUsdc {
+    /// Canonical decimal USDC, at least 2 fractional digits.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let scale = 10u128.pow(USDC_DECIMALS);
+        let (whole, frac) = (self.0 / scale, self.0 % scale);
+        let frac = format!("{frac:06}");
+        let trimmed = frac.trim_end_matches('0');
+        let frac = if trimmed.len() <= 2 { &frac[..2] } else { trimmed };
+        write!(f, "{whole}.{frac}")
+    }
+}
+
+/// Per-payment spending ceiling. `Unset` refuses to sign anything.
+#[derive(Debug, PartialEq, Eq)]
+pub enum AmountGuard {
+    Unset,
+    Max(AtomicUsdc),
+}
+
+impl AmountGuard {
+    /// Parse a decimal USDC string ("0.50") into an atomic-unit ceiling.
+    pub fn parse(s: &str) -> Result<Self, Error> {
+        Ok(Self::Max(AtomicUsdc::parse_decimal(s)?))
     }
 
-    /// Check an atomic-unit amount string against the ceiling.
-    pub fn check(&self, atomic: &str) -> Result<(), Error> {
-        let amount: u128 = atomic
-            .parse()
-            .map_err(|_| Error::BadAmount(atomic.to_string()))?;
+    /// Check an already-parsed demand against the ceiling. Parse-don't-validate:
+    /// the caller turns the wire string into an `AtomicUsdc` once, then hands it
+    /// here — this never touches a raw amount string.
+    pub fn check(&self, amount: AtomicUsdc) -> Result<(), Error> {
         match self {
             Self::Unset => Err(Error::CeilingUnset),
             Self::Max(ceiling) if amount > *ceiling => Err(Error::OverCeiling {
@@ -126,16 +166,6 @@ impl AmountGuard {
             Self::Max(_) => Ok(()),
         }
     }
-}
-
-/// Format atomic USDC units as a decimal string (at least 2 decimals).
-pub fn fmt_usdc(atomic: u128) -> String {
-    let scale = 10u128.pow(USDC_DECIMALS);
-    let (whole, frac) = (atomic / scale, atomic % scale);
-    let frac = format!("{frac:06}");
-    let trimmed = frac.trim_end_matches('0');
-    let frac = if trimmed.len() <= 2 { &frac[..2] } else { trimmed };
-    format!("{whole}.{frac}")
 }
 
 /// Port: one way of satisfying an x402 payment demand.
@@ -188,10 +218,11 @@ mod tests {
 
     #[test]
     fn guard_parses_decimal_usdc() {
-        assert_eq!(AmountGuard::parse("0.50").unwrap(), AmountGuard::Max(500_000));
-        assert_eq!(AmountGuard::parse("1").unwrap(), AmountGuard::Max(1_000_000));
-        assert_eq!(AmountGuard::parse("2.000001").unwrap(), AmountGuard::Max(2_000_001));
-        assert_eq!(AmountGuard::parse(".5").unwrap(), AmountGuard::Max(500_000));
+        let max = |u| AmountGuard::Max(AtomicUsdc::from_atomic(u));
+        assert_eq!(AmountGuard::parse("0.50").unwrap(), max(500_000));
+        assert_eq!(AmountGuard::parse("1").unwrap(), max(1_000_000));
+        assert_eq!(AmountGuard::parse("2.000001").unwrap(), max(2_000_001));
+        assert_eq!(AmountGuard::parse(".5").unwrap(), max(500_000));
     }
 
     #[test]
@@ -209,29 +240,41 @@ mod tests {
 
     #[test]
     fn guard_checks_atomic_amounts() {
-        let g = AmountGuard::Max(500_000); // 0.50 USDC
-        assert!(g.check("499999").is_ok());
-        assert!(g.check("500000").is_ok()); // at ceiling: allowed
-        assert!(matches!(g.check("500001"), Err(Error::OverCeiling { .. })));
-        assert!(g.check("not-a-number").is_err());
+        let g = AmountGuard::Max(AtomicUsdc::from_atomic(500_000)); // 0.50 USDC
+        let a = |s: &str| AtomicUsdc::parse_wire(s).unwrap();
+        assert!(g.check(a("499999")).is_ok());
+        assert!(g.check(a("500000")).is_ok()); // at ceiling: allowed
+        assert!(matches!(g.check(a("500001")), Err(Error::OverCeiling { .. })));
     }
 
     #[test]
     fn guard_unset_refuses_everything() {
-        assert!(matches!(AmountGuard::Unset.check("1"), Err(Error::CeilingUnset)));
+        assert!(matches!(
+            AmountGuard::Unset.check(AtomicUsdc::from_atomic(1)),
+            Err(Error::CeilingUnset)
+        ));
     }
 
     #[test]
     fn formats_atomic_as_decimal_usdc() {
-        assert_eq!(fmt_usdc(500_000), "0.50");
-        assert_eq!(fmt_usdc(1_000_000), "1.00");
-        assert_eq!(fmt_usdc(2_000_001), "2.000001");
-        assert_eq!(fmt_usdc(0), "0.00");
+        let s = |u| AtomicUsdc::from_atomic(u).to_string();
+        assert_eq!(s(500_000), "0.50");
+        assert_eq!(s(1_000_000), "1.00");
+        assert_eq!(s(2_000_001), "2.000001");
+        assert_eq!(s(0), "0.00");
     }
 
     #[test]
-    fn guard_check_survives_huge_wire_amounts() {
-        let g = AmountGuard::Max(500_000);
-        assert!(matches!(g.check(&"9".repeat(50)), Err(Error::BadAmount(_))));
+    fn parse_wire_rejects_bad_and_out_of_range() {
+        // parse-don't-validate: unparseable/oversized wire amounts fail at the
+        // boundary, before the guard ever sees them.
+        assert!(matches!(
+            AtomicUsdc::parse_wire("not-a-number"),
+            Err(Error::BadAmount(_))
+        ));
+        assert!(matches!(
+            AtomicUsdc::parse_wire(&"9".repeat(50)),
+            Err(Error::BadAmount(_))
+        ));
     }
 }

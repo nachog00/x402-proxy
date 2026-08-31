@@ -94,18 +94,25 @@ impl X402Proxy {
             }
         };
 
-        if let Err(e) = self.guard.check(&entry.amount) {
-            return Some(CallToolResult::error(vec![ContentBlock::text(format!(
+        // Parse the wire amount once (parse-don't-validate); the guard and the
+        // log line both consume the typed value.
+        let refuse = |e: crate::payment::Error| {
+            Some(CallToolResult::error(vec![ContentBlock::text(format!(
                 "x402-proxy refused to pay for '{}': {e}",
                 request.name
-            ))]));
+            ))]))
+        };
+        let amount = match crate::payment::AtomicUsdc::parse_wire(&entry.amount) {
+            Ok(a) => a,
+            Err(e) => return refuse(e),
+        };
+        if let Err(e) = self.guard.check(amount) {
+            return refuse(e);
         }
 
         eprintln!(
-            "[x402-proxy] paying {} USDC to {} for '{}'",
-            crate::payment::fmt_usdc(entry.amount.parse().unwrap_or(0)),
-            entry.pay_to,
-            request.name
+            "[x402-proxy] paying {amount} USDC to {} for '{}'",
+            entry.pay_to, request.name
         );
 
         let scheme = match self.scheme().await {
