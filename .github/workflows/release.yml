@@ -10,6 +10,7 @@ on:
 concurrency: release
 permissions:
   contents: write
+  pull-requests: write
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -49,10 +50,26 @@ jobs:
         run: cargo publish -p x402-proxy
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - name: Sync dev to main
+      - name: Reconcile dev with main
         if: steps.m.outputs.mode == 'release'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # fast-forward dev to include the release/bump commit, so the branches
-          # don't drift (Cargo.toml version stays consistent for the next round)
-          git push origin HEAD:dev \
-            || echo "::warning::could not fast-forward dev; back-merge main into dev manually"
+          # Bring the release (version bump + changelog) back into dev so the
+          # branches don't drift. Merge if clean; otherwise open a reconcile PR.
+          main_head=$(git rev-parse HEAD)
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin dev
+          git checkout -B dev origin/dev
+          if git merge --no-edit "$main_head"; then
+            git push origin dev
+            echo "dev reconciled with main"
+          else
+            git merge --abort
+            echo "::warning::back-merge of main into dev has conflicts — resolve via the reconcile PR"
+            gh pr create --base dev --head main \
+              --title "Reconcile main -> dev" \
+              --body "The automated post-release back-merge of main into dev hit conflicts. Resolve and merge to bring the version bump + changelog into dev." \
+              2>/dev/null || echo "reconcile PR already open"
+          fi
