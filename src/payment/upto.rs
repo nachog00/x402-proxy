@@ -179,26 +179,24 @@ impl PaymentScheme for UptoPermit2 {
 mod tests {
     use super::*;
     use crate::payment::{AcceptsEntry, Extra};
+    use crate::testkit::*;
 
     fn test_signer() -> PrivateKeySigner {
-        // Throwaway key 0x…01 — publicly known, never funded.
-        "0x0000000000000000000000000000000000000000000000000000000000000001"
-            .parse()
-            .unwrap()
+        THROWAWAY_KEY.parse().unwrap()
     }
 
     fn apify_upto_entry() -> AcceptsEntry {
         AcceptsEntry {
             scheme: "upto".into(),
-            network: "eip155:8453".into(),
-            asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913".into(),
-            amount: "1000000".into(),
-            pay_to: "0x4aAbE17C239eF71c3A26bA7C2b3e0AeBbfC1DF26".into(),
+            network: BASE_NETWORK.into(),
+            asset: USDC.into(),
+            amount: AMOUNT_1_USDC.into(),
+            pay_to: PAY_TO.into(),
             max_timeout_seconds: Some(18000),
             extra: Extra {
                 name: Some("USD Coin".into()),
                 version: Some("2".into()),
-                facilitator_address: Some("0x14fDa13953Fc30428938E6BF950d036e77214e52".into()),
+                facilitator_address: Some(FACILITATOR.into()),
             },
         }
     }
@@ -230,33 +228,24 @@ mod tests {
         let nonce = B256::from(U256::from(1u64));
         // sign_at(entry, ver, nonce, deadline, valid_after)
         let p = scheme
-            .sign_at(&apify_upto_entry(), 2, nonce, 1_700_000_060, 1_700_000_000)
+            .sign_at(&apify_upto_entry(), 2, nonce, DEADLINE, VALID_AFTER)
             .unwrap();
         assert_eq!(p["x402Version"], 2);
         assert_eq!(p["scheme"], "upto");
-        assert_eq!(p["network"], "eip155:8453");
+        assert_eq!(p["network"], BASE_NETWORK);
 
         let auth = &p["payload"]["permit2Authorization"];
         // Addresses compared by value, not checksum casing.
         let addr = |v: &Value| v.as_str().unwrap().parse::<Address>().unwrap();
-        assert_eq!(addr(&auth["permitted"]["token"]), BASE_USDC);
-        assert_eq!(auth["permitted"]["amount"], "1000000");
-        assert_eq!(addr(&auth["from"]), test_signer().address());
+        let expect_addr = |s: &str| s.parse::<Address>().unwrap();
+        assert_eq!(addr(&auth["permitted"]["token"]), expect_addr(USDC));
+        assert_eq!(auth["permitted"]["amount"], AMOUNT_1_USDC);
+        assert_eq!(addr(&auth["from"]), expect_addr(THROWAWAY_ADDR));
         assert_eq!(addr(&auth["spender"]), SPENDER_PROXY);
-        assert_eq!(auth["deadline"], "1700000060");
-        assert_eq!(
-            addr(&auth["witness"]["to"]),
-            "0x4aAbE17C239eF71c3A26bA7C2b3e0AeBbfC1DF26"
-                .parse::<Address>()
-                .unwrap()
-        );
-        assert_eq!(
-            addr(&auth["witness"]["facilitator"]),
-            "0x14fDa13953Fc30428938E6BF950d036e77214e52"
-                .parse::<Address>()
-                .unwrap()
-        );
-        assert_eq!(auth["witness"]["validAfter"], "1700000000");
+        assert_eq!(auth["deadline"], DEADLINE.to_string());
+        assert_eq!(addr(&auth["witness"]["to"]), expect_addr(PAY_TO));
+        assert_eq!(addr(&auth["witness"]["facilitator"]), expect_addr(FACILITATOR));
+        assert_eq!(auth["witness"]["validAfter"], VALID_AFTER.to_string());
         assert_eq!(
             auth["nonce"],
             "0x0000000000000000000000000000000000000000000000000000000000000001"
@@ -272,7 +261,7 @@ mod tests {
         let scheme = UptoPermit2::new(test_signer());
         let nonce = B256::from(U256::from(1u64));
         let payment = scheme
-            .sign_at(&apify_upto_entry(), 2, nonce, 1_700_000_060, 1_700_000_000)
+            .sign_at(&apify_upto_entry(), 2, nonce, DEADLINE, VALID_AFTER)
             .unwrap();
         assert_eq!(payment["payload"]["signature"], VIEM_SIG);
     }
@@ -282,10 +271,10 @@ mod tests {
         let scheme = UptoPermit2::new(test_signer());
         let nonce = B256::from(U256::from(1u64));
         let a = scheme
-            .sign_at(&apify_upto_entry(), 2, nonce, 1_700_000_060, 1_700_000_000)
+            .sign_at(&apify_upto_entry(), 2, nonce, DEADLINE, VALID_AFTER)
             .unwrap();
         let b = scheme
-            .sign_at(&apify_upto_entry(), 2, nonce, 1_700_000_060, 1_700_000_000)
+            .sign_at(&apify_upto_entry(), 2, nonce, DEADLINE, VALID_AFTER)
             .unwrap();
         assert_eq!(a, b, "same inputs must produce the same signature");
         let sig = a["payload"]["signature"].as_str().unwrap();

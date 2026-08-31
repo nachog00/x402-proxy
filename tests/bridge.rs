@@ -10,6 +10,7 @@ use zeroize::Zeroizing;
 use x402_proxy::key::{self, SecretResolver};
 use x402_proxy::payment::{AmountGuard, AtomicUsdc};
 use x402_proxy::proxy::X402Proxy;
+use x402_proxy::testkit::THROWAWAY_ADDR;
 
 const PAYMENT_JSON: &str = r#"{"x402Version":2,"accepts":[{"scheme":"exact","network":"eip155:8453","asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","amount":"1000000","payTo":"0x4aAbE17C239eF71c3A26bA7C2b3e0AeBbfC1DF26","maxTimeoutSeconds":60,"extra":{"name":"USD Coin","version":"2"}}]}"#;
 
@@ -174,10 +175,7 @@ async fn signs_and_retries_on_payment_required() {
     let p = &payments[0];
     assert_eq!(p["scheme"], "exact");
     assert_eq!(p["network"], "eip155:8453");
-    assert_eq!(
-        p["payload"]["authorization"]["from"],
-        "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf"
-    );
+    assert_eq!(p["payload"]["authorization"]["from"], THROWAWAY_ADDR);
     let sig = p["payload"]["signature"].as_str().unwrap();
     assert!(sig.starts_with("0x") && sig.len() == 132);
 }

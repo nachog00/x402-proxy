@@ -132,21 +132,19 @@ impl PaymentScheme for ExactEip3009 {
 mod tests {
     use super::*;
     use crate::payment::{AcceptsEntry, Extra};
+    use crate::testkit::*;
 
     fn test_signer() -> PrivateKeySigner {
-        // Throwaway key 0x…01 — publicly known, never funded.
-        "0x0000000000000000000000000000000000000000000000000000000000000001"
-            .parse()
-            .unwrap()
+        THROWAWAY_KEY.parse().unwrap()
     }
 
     fn apify_entry() -> AcceptsEntry {
         AcceptsEntry {
             scheme: "exact".into(),
-            network: "eip155:8453".into(),
-            asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913".into(),
-            amount: "1000000".into(),
-            pay_to: "0x4aAbE17C239eF71c3A26bA7C2b3e0AeBbfC1DF26".into(),
+            network: BASE_NETWORK.into(),
+            asset: USDC.into(),
+            amount: AMOUNT_1_USDC.into(),
+            pay_to: PAY_TO.into(),
             max_timeout_seconds: Some(60),
             extra: Extra {
                 name: Some("USD Coin".into()),
@@ -158,10 +156,7 @@ mod tests {
 
     #[test]
     fn signer_address_matches_known_key() {
-        assert_eq!(
-            test_signer().address().to_string(),
-            "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf"
-        );
+        assert_eq!(test_signer().address().to_string(), THROWAWAY_ADDR);
     }
 
     #[test]
@@ -172,7 +167,7 @@ mod tests {
         let scheme = ExactEip3009::new(test_signer());
         let nonce = B256::from(U256::from(1u64));
         let payment = scheme
-            .sign_at(&apify_entry(), 2, nonce, 1_700_000_000, 1_700_000_060)
+            .sign_at(&apify_entry(), 2, nonce, VALID_AFTER, VALID_BEFORE)
             .unwrap();
         assert_eq!(payment["payload"]["signature"], VIEM_SIG);
     }
@@ -182,17 +177,17 @@ mod tests {
         let scheme = ExactEip3009::new(test_signer());
         let nonce = B256::from(U256::from(1u64));
         let p = scheme
-            .sign_at(&apify_entry(), 2, nonce, 1_700_000_000, 1_700_000_060)
+            .sign_at(&apify_entry(), 2, nonce, VALID_AFTER, VALID_BEFORE)
             .unwrap();
         assert_eq!(p["x402Version"], 2);
         assert_eq!(p["scheme"], "exact");
-        assert_eq!(p["network"], "eip155:8453");
+        assert_eq!(p["network"], BASE_NETWORK);
         let auth = &p["payload"]["authorization"];
-        assert_eq!(auth["from"], "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf");
-        assert_eq!(auth["to"], "0x4aAbE17C239eF71c3A26bA7C2b3e0AeBbfC1DF26");
-        assert_eq!(auth["value"], "1000000");
-        assert_eq!(auth["validAfter"], "1700000000");
-        assert_eq!(auth["validBefore"], "1700000060");
+        assert_eq!(auth["from"], THROWAWAY_ADDR);
+        assert_eq!(auth["to"], PAY_TO);
+        assert_eq!(auth["value"], AMOUNT_1_USDC);
+        assert_eq!(auth["validAfter"], VALID_AFTER.to_string());
+        assert_eq!(auth["validBefore"], VALID_BEFORE.to_string());
         assert_eq!(
             auth["nonce"],
             "0x0000000000000000000000000000000000000000000000000000000000000001"
