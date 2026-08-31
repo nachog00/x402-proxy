@@ -156,7 +156,11 @@ mod tests {
             amount: "1000000".into(),
             pay_to: "0x4aAbE17C239eF71c3A26bA7C2b3e0AeBbfC1DF26".into(),
             max_timeout_seconds: Some(60),
-            extra: Extra { name: Some("USD Coin".into()), version: Some("2".into()) },
+            extra: Extra {
+                name: Some("USD Coin".into()),
+                version: Some("2".into()),
+                facilitator_address: None,
+            },
         }
     }
 

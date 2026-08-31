@@ -41,11 +41,17 @@ pub struct AcceptsEntry {
     pub extra: Extra,
 }
 
-/// EIP-712 domain hints supplied by the server.
+/// Scheme hints supplied by the server. For `exact` these are the EIP-712
+/// domain name/version; for `upto` they also carry the facilitator address the
+/// Permit2 witness must be bound to.
 #[derive(Debug, Default, Deserialize)]
 pub struct Extra {
     pub name: Option<String>,
     pub version: Option<String>,
+    /// Facilitator EOA for the `upto` (Permit2) scheme — the only address
+    /// allowed to settle, bound into the signed witness.
+    #[serde(rename = "facilitatorAddress")]
+    pub facilitator_address: Option<String>,
 }
 
 impl PaymentRequired {
@@ -197,6 +203,22 @@ mod tests {
         assert_eq!(e.max_timeout_seconds, Some(60));
         assert_eq!(e.extra.name.as_deref(), Some("USD Coin"));
         assert_eq!(e.extra.version.as_deref(), Some("2"));
+        assert_eq!(e.extra.facilitator_address, None); // exact has none
+    }
+
+    // The `upto` (Permit2) entry Apify offers alongside `exact` (captured live).
+    const APIFY_UPTO: &str = r#"{"x402Version":2,"accepts":[{"scheme":"upto","network":"eip155:8453","asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","amount":"1000000","payTo":"0x4aAbE17C239eF71c3A26bA7C2b3e0AeBbfC1DF26","maxTimeoutSeconds":18000,"extra":{"name":"USD Coin","version":"2","facilitatorAddress":"0x14fDa13953Fc30428938E6BF950d036e77214e52"}}]}"#;
+
+    #[test]
+    fn parses_upto_entry_with_facilitator() {
+        let pr = PaymentRequired::from_error_text(APIFY_UPTO).unwrap();
+        let e = &pr.accepts[0];
+        assert_eq!(e.scheme, "upto");
+        assert_eq!(e.max_timeout_seconds, Some(18000));
+        assert_eq!(
+            e.extra.facilitator_address.as_deref(),
+            Some("0x14fDa13953Fc30428938E6BF950d036e77214e52")
+        );
     }
 
     #[test]
