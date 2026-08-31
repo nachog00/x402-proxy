@@ -1,0 +1,15 @@
+name: Release
+# Publishes to crates.io when a GitHub Release is published (knope creates the
+# release via its `release` workflow). Requires a CARGO_REGISTRY_TOKEN secret.
+on:
+  release:
+    types: [published]
+jobs:
+  crates-io:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo publish -p x402-proxy
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
