@@ -2,6 +2,13 @@
 
 Managed by [knope](https://knope.tech) — add entries with `knope document-change`.
 
+## 0.1.2 (2026-09-01)
+
+### Fixes
+
+- CI: bump-in-PR release model so releases never push to protected main
+- Refactor the CLI into per-command modules (internal; no behavior change)
+
 ## 0.1.0
 
 ### Features
