@@ -33,15 +33,17 @@ Paste the printed signature into the matching `signature_matches_viem_vector` te
 
 ## Releases
 
-Automated with [knope](https://knope.tech) + changesets:
+Automated with [knope](https://knope.tech) + changesets. The rule: nothing is
+ever pushed to `main` directly — a release always arrives via a PR.
 
-1. In your PR, run `knope document-change` and commit the file it adds under
-   `.changeset/` (declares the change type and a changelog line).
-2. Opening the PR posts a preview comment with the exact version that merging
-   will release.
-3. Merging to `main` cuts it: knope derives the next version, updates
-   `CHANGELOG.md`, tags, creates the GitHub release, and CI publishes to
-   crates.io. No changesets ⇒ no release.
+1. In a PR **into `dev`**, run `knope document-change` (or `cargo make
+   changeset`) and commit the `.changeset/` file it creates. CI requires it.
+2. Merging to `dev` triggers a bot that prepares the release (version bump +
+   changelog + consumed changesets) on a `release-next` branch and opens a
+   **"Release vX.Y.Z"** PR into `main`.
+3. Review and merge that PR. A post-merge job tags `vX.Y.Z`, creates the GitHub
+   release, publishes to crates.io, and fast-forwards `dev`. Nothing pushes to
+   `main` outside the PR merge.
 
 Pre-1.0 semantics: a `minor` change bumps the patch; a breaking change bumps the
 minor.
