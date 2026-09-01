@@ -7,18 +7,19 @@ use rmcp::ServiceExt;
 use rmcp::model::{ClientCapabilities, ClientInfo, Implementation};
 use rmcp::transport::StreamableHttpClientTransport;
 
-use crate::key::OpCli;
+use crate::config::Config;
+use crate::key::KeyResolver;
 use crate::net::HttpUrl;
 use crate::payment::AmountGuard;
 use crate::proxy::X402Proxy;
 
 pub async fn run(upstream: &HttpUrl, key_ref: String) -> anyhow::Result<()> {
-    let guard = match std::env::var("X402_MAX_AMOUNT") {
-        Ok(v) => AmountGuard::parse(&v).context("X402_MAX_AMOUNT")?,
-        Err(_) => AmountGuard::Unset,
-    };
+    let config = Config::load().context("loading config")?;
+    let guard = resolve_guard(&key_ref, &config)?;
     if matches!(guard, AmountGuard::Unset) {
-        eprintln!("[x402-proxy] warning: X402_MAX_AMOUNT unset — all payments will be refused");
+        eprintln!(
+            "[x402-proxy] warning: no spend ceiling (X402_MAX_AMOUNT or a wallet max) — all payments will be refused"
+        );
     }
 
     let transport = StreamableHttpClientTransport::from_uri(upstream.as_str().to_string());
@@ -42,7 +43,7 @@ pub async fn run(upstream: &HttpUrl, key_ref: String) -> anyhow::Result<()> {
     let proxy = X402Proxy::new(
         tools,
         upstream_svc.peer().clone(),
-        Arc::new(OpCli::new()),
+        Arc::new(KeyResolver::new(config)),
         key_ref,
         guard,
     );
@@ -54,4 +55,19 @@ pub async fn run(upstream: &HttpUrl, key_ref: String) -> anyhow::Result<()> {
     eprintln!("[x402-proxy] stdio server ready");
     service.waiting().await?;
     Ok(())
+}
+
+/// Spend ceiling from `X402_MAX_AMOUNT`, falling back to the wallet's `max`
+/// when `key_ref` is `wallet:<name>`.
+fn resolve_guard(key_ref: &str, config: &Config) -> anyhow::Result<AmountGuard> {
+    if let Ok(v) = std::env::var("X402_MAX_AMOUNT") {
+        return AmountGuard::parse(&v).context("X402_MAX_AMOUNT");
+    }
+    if let Some(name) = key_ref.strip_prefix("wallet:")
+        && let Ok(w) = config.wallet(name)
+        && let Some(m) = &w.max
+    {
+        return AmountGuard::parse(m).context("wallet max");
+    }
+    Ok(AmountGuard::Unset)
 }

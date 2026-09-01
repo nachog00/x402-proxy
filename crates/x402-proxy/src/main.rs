@@ -15,6 +15,23 @@ async fn main() -> anyhow::Result<()> {
     let key_ref = std::env::var("X402_KEY_REF").unwrap_or_default();
     match cli.command {
         Command::Serve { upstream } => x402_proxy::commands::serve::run(&upstream, key_ref).await,
+        Command::Install {
+            upstream,
+            name,
+            wallet,
+            key_ref,
+            max,
+            client,
+            scope,
+        } => x402_proxy::commands::install::run(
+            &upstream,
+            &name,
+            wallet.as_deref(),
+            key_ref.as_deref(),
+            max.as_deref(),
+            client,
+            scope,
+        ),
         Command::ApprovePermit2 {
             rpc_url,
             amount,

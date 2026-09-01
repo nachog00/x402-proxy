@@ -34,6 +34,18 @@ impl HttpUrl {
     pub fn into_url(self) -> url::Url {
         self.0
     }
+
+    /// Return this URL guaranteed to carry the x402 `payment=x402` query param,
+    /// so a caller can pass a bare host (`https://mcp.apify.com`). If a
+    /// `payment` param is already present it's left untouched.
+    pub fn with_payment_param(&self) -> HttpUrl {
+        if self.0.query_pairs().any(|(k, _)| k == "payment") {
+            return self.clone();
+        }
+        let mut url = self.0.clone();
+        url.query_pairs_mut().append_pair("payment", "x402");
+        HttpUrl(url)
+    }
 }
 
 impl FromStr for HttpUrl {
@@ -95,5 +107,17 @@ mod tests {
         ));
         // http scheme with no host
         assert!("http://".parse::<HttpUrl>().is_err());
+    }
+
+    #[test]
+    fn appends_payment_param_when_absent() {
+        let bare: HttpUrl = "https://mcp.apify.com".parse().unwrap();
+        assert_eq!(
+            bare.with_payment_param().as_url().query(),
+            Some("payment=x402")
+        );
+        // already present -> untouched
+        let has: HttpUrl = "https://x.test?payment=x402&a=1".parse().unwrap();
+        assert_eq!(has.with_payment_param().as_str(), has.as_str());
     }
 }
