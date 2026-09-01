@@ -15,9 +15,21 @@ required.
 
 ## Install
 
+Prebuilt binary (no compile), via [`cargo-binstall`](https://github.com/cargo-bins/cargo-binstall):
+
+```sh
+cargo binstall x402-proxy
+```
+
+Or build from source:
+
 ```sh
 cargo install x402-proxy
 ```
+
+Prebuilt binaries are published for Linux (`x86_64`, `aarch64`), macOS
+(`x86_64`, `aarch64`), and Windows (`x86_64`); `binstall` falls back to a source
+build on other targets.
 
 ## Quickstart
 

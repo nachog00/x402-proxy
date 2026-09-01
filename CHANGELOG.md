@@ -2,6 +2,17 @@
 
 Managed by [knope](https://knope.tech) — add entries with `knope document-change`.
 
+## 0.1.5 (2026-09-01)
+
+### Fixes
+
+#### Prebuilt binaries via `cargo binstall`
+
+Each release now attaches prebuilt binaries for Linux (`x86_64`, `aarch64`),
+macOS (`x86_64`, `aarch64`), and Windows (`x86_64`), so `cargo binstall
+x402-proxy` installs without compiling. Falls back to a source build on other
+targets.
+
 ## 0.1.4 (2026-09-01)
 
 ### Features
