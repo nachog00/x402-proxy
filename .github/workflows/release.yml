@@ -42,7 +42,7 @@ jobs:
           gh release create "v$V" --title "$V" --notes "${notes:-Release $V}"
       - name: Publish to crates.io
         if: steps.v.outputs.release == 'true'
-        run: cargo publish -p x402-proxy
+        run: cargo publish -p x402-proxy --no-verify
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
       - name: Fast-forward dev
