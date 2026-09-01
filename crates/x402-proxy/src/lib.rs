@@ -1,7 +1,8 @@
 //! x402-proxy — stdio MCP server that proxies an upstream HTTP MCP server
-//! and auto-signs x402 payments (USDC on Base, exact scheme).
+//! and auto-signs x402 payments (USDC on Base, exact + upto schemes).
 
-pub mod approve;
+pub mod cli;
+pub mod commands;
 pub mod key;
 pub mod net;
 pub mod payment;
