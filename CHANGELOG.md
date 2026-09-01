@@ -2,6 +2,12 @@
 
 Managed by [knope](https://knope.tech) — add entries with `knope document-change`.
 
+## 0.1.3 (2026-09-01)
+
+### Fixes
+
+- CI: publish with `--no-verify` (CI already builds and tests the exact commit)
+
 ## 0.1.2 (2026-09-01)
 
 ### Fixes
