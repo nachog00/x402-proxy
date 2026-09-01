@@ -15,7 +15,8 @@ use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::sol;
 use anyhow::{Context, Result, bail};
 
-use crate::key::{OpCli, SecretResolver};
+use crate::config::Config;
+use crate::key::{KeyResolver, SecretResolver};
 use crate::net::HttpUrl;
 use crate::payment::{AtomicUsdc, BASE_USDC};
 
@@ -79,12 +80,14 @@ pub async fn run(
     }
     let requested = amount.to_u256();
 
-    // Resolve the key via op (blocking), same path as payments. Never logged.
+    // Resolve the key (blocking), same multi-source path as payments — honors
+    // op://, env:, file:, wallet:, and raw keys. Never logged.
+    let config = Config::load().context("loading config")?;
     let key_ref_owned = key_ref.to_string();
-    let key = tokio::task::spawn_blocking(move || OpCli::new().resolve(&key_ref_owned))
+    let key = tokio::task::spawn_blocking(move || KeyResolver::new(config).resolve(&key_ref_owned))
         .await
         .context("key resolution task failed")?
-        .context("resolving X402_KEY_REF via op")?;
+        .context("resolving X402_KEY_REF")?;
     let signer: PrivateKeySigner = key
         .trim()
         .parse()

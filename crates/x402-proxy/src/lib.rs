@@ -3,6 +3,7 @@
 
 pub mod cli;
 pub mod commands;
+pub mod config;
 pub mod key;
 pub mod net;
 pub mod payment;
