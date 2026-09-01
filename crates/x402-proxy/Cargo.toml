@@ -9,6 +9,18 @@ readme = "README.md"
 keywords = ["x402", "mcp", "payments", "ethereum", "usdc"]
 categories = ["command-line-utilities"]
 
+# cargo-binstall: pull prebuilt binaries from the GitHub release (tag `v{version}`,
+# assets `x402-proxy-<target>.tar.gz`, binary at the archive root). Matches the
+# naming produced by taiki-e/upload-rust-binary-action in release.yml.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }.{ archive-format }"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+# Windows ships as a .zip (taiki-e uses zip on windows).
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+
 [dependencies]
 alloy-primitives = { version = "1.6", features = ["rand"] }
 alloy-signer = { version = "2.1", features = ["eip712"] }

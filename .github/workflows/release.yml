@@ -1,7 +1,8 @@
 name: Release
 # On merge to main: if Cargo.toml's version has no tag yet, tag it, create the
-# GitHub release, publish to crates.io, and fast-forward dev. Nothing pushes to
-# main (the bump arrived via the merged PR); tags and dev aren't protected, so
+# GitHub release, publish to crates.io, and fast-forward dev. Then a matrix job
+# attaches prebuilt binaries to the release for `cargo binstall`. Nothing pushes
+# to main (the bump arrived via the merged PR); tags and dev aren't protected, so
 # GITHUB_TOKEN suffices — no PAT.
 on:
   push:
@@ -12,6 +13,9 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.v.outputs.release }}
+      version: ${{ steps.v.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -58,3 +62,51 @@ jobs:
             git merge --abort
             echo "::warning::dev reconcile conflict — back-merge main into dev manually"
           fi
+
+  # Build a prebuilt binary per target and attach it to the release, so
+  # `cargo binstall x402-proxy` fetches it instead of compiling. Naming matches
+  # the [package.metadata.binstall] pkg-url in Cargo.toml.
+  upload-binaries:
+    needs: release
+    if: needs.release.outputs.release == 'true'
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            cross: true
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/v${{ needs.release.outputs.version }}
+      # Cross-linked Linux targets (e.g. aarch64) get their toolchain + linker here.
+      - name: Set up cross toolchain
+        if: matrix.cross
+        uses: taiki-e/setup-cross-toolchain-action@v1
+        with:
+          target: ${{ matrix.target }}
+      - name: Set up Rust
+        if: '!matrix.cross'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build + upload binary
+        uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: x402-proxy
+          target: ${{ matrix.target }}
+          ref: refs/tags/v${{ needs.release.outputs.version }}
+          checksum: sha256
+          token: ${{ secrets.GITHUB_TOKEN }}
