@@ -102,6 +102,13 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      # Per-target cache so a re-release (or a quick follow-up patch) reuses the
+      # release build instead of compiling all deps cold. Keyed by target so the
+      # five matrix legs never share a cache dir.
+      - name: Cache release build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
       - name: Build + upload binary
         uses: taiki-e/upload-rust-binary-action@v1
         with:
