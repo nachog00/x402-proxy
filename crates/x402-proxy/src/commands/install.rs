@@ -123,22 +123,33 @@ fn mcp_json(server: &McpServer) -> serde_json::Value {
     })
 }
 
-/// Run `claude mcp add <name> --scope <s> --transport stdio -e K=V … -- <command> <args…>`.
-fn run_claude_mcp_add(server: &McpServer, scope: InstallScope) -> Result<()> {
-    let mut cmd = Command::new("claude");
-    cmd.arg("mcp")
-        .arg("add")
-        .arg(&server.name)
-        .arg("--scope")
-        .arg(scope.as_claude_flag())
-        .arg("--transport")
-        .arg("stdio");
+/// Build the argv for `claude mcp add` (everything after the program name).
+/// Pure, so the exact command shape is unit-tested without spawning anything:
+/// `mcp add <name> --scope <s> --transport stdio -e K=V … -- <command> <args…>`.
+fn claude_add_args(server: &McpServer, scope: InstallScope) -> Vec<String> {
+    let mut args = vec![
+        "mcp".to_string(),
+        "add".to_string(),
+        server.name.clone(),
+        "--scope".to_string(),
+        scope.as_claude_flag().to_string(),
+        "--transport".to_string(),
+        "stdio".to_string(),
+    ];
     for (k, v) in &server.env {
-        cmd.arg("-e").arg(format!("{k}={v}"));
+        args.push("-e".to_string());
+        args.push(format!("{k}={v}"));
     }
-    cmd.arg("--").arg(&server.command).args(&server.args);
+    args.push("--".to_string());
+    args.push(server.command.clone());
+    args.extend(server.args.iter().cloned());
+    args
+}
 
-    let status = cmd
+/// Run `claude` with the argv from [`claude_add_args`].
+fn run_claude_mcp_add(server: &McpServer, scope: InstallScope) -> Result<()> {
+    let status = Command::new("claude")
+        .args(claude_add_args(server, scope))
         .status()
         .context("running `claude mcp add` — is the Claude CLI on PATH?")?;
     if !status.success() {
@@ -279,5 +290,33 @@ mod tests {
         assert_eq!(entry["command"], "x402-proxy");
         assert_eq!(entry["args"][0], "serve");
         assert_eq!(entry["env"]["X402_KEY_REF"], "wallet:main");
+    }
+
+    #[test]
+    fn claude_add_args_shape() {
+        let s = plan(&upstream(), "apify", Some("main"), None, None, &cfg()).unwrap();
+        let args = claude_add_args(&s, InstallScope::Project);
+        // command skeleton
+        assert_eq!(
+            &args[..7],
+            &[
+                "mcp",
+                "add",
+                "apify",
+                "--scope",
+                "project",
+                "--transport",
+                "stdio"
+            ]
+        );
+        // every env pair is passed as `-e K=V`
+        let joined = args.join(" ");
+        assert!(joined.contains("-e X402_KEY_REF=wallet:main"));
+        assert!(joined.contains("-e X402_MAX_AMOUNT=0.50"));
+        // upstream invocation is after the `--` separator, program first
+        let sep = args.iter().position(|a| a == "--").unwrap();
+        assert_eq!(args[sep + 1], "x402-proxy");
+        assert_eq!(args[sep + 2], "serve");
+        assert_eq!(args.last().unwrap(), "https://mcp.apify.com/?payment=x402");
     }
 }
