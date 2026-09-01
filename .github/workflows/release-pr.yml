@@ -1,31 +1,59 @@
 name: Release PR
+# On push to dev: if there are changesets, knope prepares the release (bump +
+# changelog + consume changesets) on a throwaway `release-next` branch and opens
+# a PR release-next -> main. Nothing is pushed to main. No changesets => close it.
 on:
   push:
     branches: [dev]
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
 concurrency: release-pr
 jobs:
-  open:
+  prepare:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Open/update dev -> main release PR
+          ref: dev
+      - name: Changesets present?
+        id: c
+        run: |
+          if find .changeset -name '*.md' -type f 2>/dev/null | grep -q .; then
+            echo "has=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: knope-dev/action@v2.1.2
+        if: steps.c.outputs.has == 'true'
+        with:
+          version: 0.23.0
+      - name: Prepare release on release-next
+        if: steps.c.outputs.has == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git fetch origin main --depth=1
-          if git diff --quiet origin/main..HEAD; then
-            echo "dev has no changes over main — nothing to open."; exit 0
-          fi
-          open=$(gh pr list --base main --head dev --state open --json number --jq 'length')
-          if [ "$open" = "0" ]; then
-            gh pr create --base main --head dev \
-              --title "Release: dev → main" \
-              --body $'Automated release PR — opened when `dev` diverges from `main`.\n\nMerging it consumes the changesets on `dev` and cuts a versioned release (see the preview comment for the exact version). **Merge with a merge commit** (not squash) so `dev` stays an ancestor of `main` and the post-release sync can fast-forward `dev`.'
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          knope prepare-release --verbose
+          V=$(grep -m1 '^version' crates/x402-proxy/Cargo.toml | cut -d'"' -f2)
+          git checkout -B release-next
+          git add -A
+          git commit -m "chore: release v$V"
+          git push -f origin release-next
+          notes=$(awk -v v="$V" '$0 ~ "^## " v {f=1; next} /^## /{f=0} f' CHANGELOG.md)
+          body=$(printf 'Merging this PR releases **v%s** and publishes to crates.io.\n\n## Changelog\n\n%s\n' "$V" "$notes")
+          if [ "$(gh pr list --base main --head release-next --state open --json number --jq 'length')" = "0" ]; then
+            gh pr create --base main --head release-next --title "Release v$V" --body "$body"
           else
-            echo "Release PR already open; it tracks new dev commits automatically."
+            n=$(gh pr list --base main --head release-next --state open --json number --jq '.[0].number')
+            gh pr edit "$n" --title "Release v$V" --body "$body"
           fi
+      - name: No changesets — close any open release PR
+        if: steps.c.outputs.has == 'false'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          n=$(gh pr list --base main --head release-next --state open --json number --jq '.[0].number // empty')
+          if [ -n "$n" ]; then gh pr close "$n" --delete-branch; else echo "no open release PR"; fi

@@ -1,16 +1,14 @@
 name: Release
-# Ongoing: on merge to main, if there are pending changesets, knope derives the
-# next version (bump + changelog + tag + GitHub release) and we publish to
-# crates.io. No changesets => no-op.
-# Bootstrap/recovery: workflow_dispatch publishes the current version as-is.
+# On merge to main: if Cargo.toml's version has no tag yet, tag it, create the
+# GitHub release, publish to crates.io, and fast-forward dev. Nothing pushes to
+# main (the bump arrived via the merged PR); tags and dev aren't protected, so
+# GITHUB_TOKEN suffices — no PAT.
 on:
   push:
     branches: [main]
-  workflow_dispatch:
 concurrency: release
 permissions:
   contents: write
-  pull-requests: write
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -18,58 +16,45 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Decide mode
-        id: m
+      - name: Untagged version?
+        id: v
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "mode=publish-current" >> "$GITHUB_OUTPUT"
-          elif find .changeset -name '*.md' -type f 2>/dev/null | grep -q .; then
-            echo "mode=release" >> "$GITHUB_OUTPUT"
+          V=$(grep -m1 '^version' crates/x402-proxy/Cargo.toml | cut -d'"' -f2)
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          if git rev-parse "v$V" >/dev/null 2>&1; then
+            echo "release=false" >> "$GITHUB_OUTPUT"; echo "v$V already released."
           else
-            echo "mode=none" >> "$GITHUB_OUTPUT"
-            echo "No changesets — nothing to release."
+            echo "release=true" >> "$GITHUB_OUTPUT"
           fi
       - uses: dtolnay/rust-toolchain@stable
-        if: steps.m.outputs.mode != 'none'
-      - uses: Swatinem/rust-cache@v2
-        if: steps.m.outputs.mode != 'none'
-      - uses: knope-dev/action@v2.1.2
-        if: steps.m.outputs.mode == 'release'
-        with:
-          version: 0.23.0
-      - name: Cut release (knope — bump, changelog, tag, GitHub release)
-        if: steps.m.outputs.mode == 'release'
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          knope release --verbose
+        if: steps.v.outputs.release == 'true'
+      - name: Tag + GitHub release
+        if: steps.v.outputs.release == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          V="${{ steps.v.outputs.version }}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "v$V"
+          git push origin "v$V"
+          notes=$(awk -v v="$V" '$0 ~ "^## " v {f=1; next} /^## /{f=0} f' CHANGELOG.md)
+          gh release create "v$V" --title "$V" --notes "${notes:-Release $V}"
       - name: Publish to crates.io
-        if: steps.m.outputs.mode != 'none'
+        if: steps.v.outputs.release == 'true'
         run: cargo publish -p x402-proxy
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      - name: Reconcile dev with main
-        if: steps.m.outputs.mode == 'release'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Fast-forward dev
+        if: steps.v.outputs.release == 'true'
         run: |
-          # Bring the release (version bump + changelog) back into dev so the
-          # branches don't drift. Merge if clean; otherwise open a reconcile PR.
-          main_head=$(git rev-parse HEAD)
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin dev
           git checkout -B dev origin/dev
-          if git merge --no-edit "$main_head"; then
+          if git merge --no-edit "${{ github.sha }}"; then
             git push origin dev
-            echo "dev reconciled with main"
           else
             git merge --abort
-            echo "::warning::back-merge of main into dev has conflicts — resolve via the reconcile PR"
-            gh pr create --base dev --head main \
-              --title "Reconcile main -> dev" \
-              --body "The automated post-release back-merge of main into dev hit conflicts. Resolve and merge to bring the version bump + changelog into dev." \
-              2>/dev/null || echo "reconcile PR already open"
+            echo "::warning::dev reconcile conflict — back-merge main into dev manually"
           fi
